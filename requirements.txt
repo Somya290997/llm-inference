@@ -1,0 +1,37 @@
+# -------------------------
+# Inference-Stream Environment
+# CUDA 11.8 build (L4 GPUs)
+# -------------------------
+
+# Core ML / CUDA stack
+torch==2.3.1
+torchvision==0.18.1
+torchaudio==2.3.1
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Hugging Face & LLM utilities
+transformers==4.43.2
+accelerate==0.33.0
+einops==0.8.0
+sentencepiece==0.2.0
+
+# System + Visualization
+tqdm==4.66.4
+psutil==6.0.0
+rich==13.7.1
+matplotlib==3.9.1
+ipywidgets==8.1.2
+jupyterlab==4.2.4
+
+# GPU profiling & diagnostics
+pynvml==11.5.0
+nvtx==0.2.10
+
+# Developer / formatting tools (optional)
+black==24.4.2
+isort==5.13.2
+flake8==7.1.1
+ipykernel==6.29.5
+
+bitsandbytes
+hf_transfer
