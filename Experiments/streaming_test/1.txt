@@ -1,0 +1,5 @@
+
+ Thank  you  very  much ! 
+ Hi , 
+ The  main  point  is  that  you  want  LL Ms  to  do  pre fill  first  generation  tasks  and  decoding  first  generation  tasks . 
+ The  first  thing  I  would  do  first ,  is  look  into  the  architecture  that  you  have .  If  you  have  a  pre fill  first  generation  model ,  then  you  have  pre fill  first  generation  tasks .  So ,  you  need  a  pre fill  first  LL M  to  perform  pre filling  and  decoding  tasks .  The  reason  behind  this  is ,  if  you  have  a  pre fill  LL M ,  you  can  do  pre fill  second  LL M  in  pre filling  and  decoding  second  LL M .  But
