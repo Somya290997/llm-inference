@@ -6,12 +6,13 @@ quantization: 4bit
 compute_dtype: float16 
 use_flash_attention: true
 
-batch_size: 2
+batch_size: 1
 max_input_tokens: 512
 max_output_tokens: 128
 num_layers: 32
 hidden_size: 4096
-num_attention_heads: 32
+n_dim: 128
+num_attention_heads: 8
 kv_cache_dtype: float16
 
 prefill_gpu: 1

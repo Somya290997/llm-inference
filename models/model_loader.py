@@ -1,52 +1,46 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+# Import Modules
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import prepare_model_for_kbit_training
 from accelerate import init_empty_weights
 import torch
 import os
 import yaml
 
-def load_config(config_path="config/model_config.yaml"):
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
 
-def load_model_and_tokenizer(config):
-    model_path = config["model_path"]
-    quantization = config["quantization"]
-    dtype = getattr(torch, config["compute_dtype"])
+# Loading the Yaml files
+with open("config/model_config.yaml", "r") as f:
+    config = yaml.safe_load(f)
 
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+# Loading yaml variable and model caching
+_model_cache = {}
+_tokenizer = None
+MODEL_PATH = config["model_path"]
 
-    # Load model with quantization
-    if quantization == "4bit":
-        from transformers import BitsAndBytesConfig
+
+# get model funtions allows to load the model only once
+def get_model(device_id):
+    if device_id not in _model_cache:
+
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
-            bnb_4bit_compute_dtype=dtype,
-            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float16,
             bnb_4bit_quant_type="nf4",
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True
-        )
-    elif quantization == "8bit":
-        from transformers import BitsAndBytesConfig
-        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True
-        )
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=dtype,
-            device_map="auto",
-            trust_remote_code=True
+            bnb_4bit_use_double_quant=True
         )
 
-    return model, tokenizer
+
+        _model_cache[device_id] = AutoModelForCausalLM.from_pretrained(
+            MODEL_PATH,
+            quantization_config=bnb_config,
+            device_map={"": device_id},
+            torch_dtype=torch.float16
+        ).eval()
+        
+    return _model_cache[device_id]
+
+# get tokenizer funtions allows to load the tokenizer only once
+def get_tokenizer():
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    return _tokenizer

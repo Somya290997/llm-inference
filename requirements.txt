@@ -35,3 +35,4 @@ ipykernel==6.29.5
 
 bitsandbytes
 hf_transfer
+cupy-cuda12x
