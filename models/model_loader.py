@@ -14,7 +14,7 @@ with open("config/model_config.yaml", "r") as f:
 # Loading yaml variable and model caching
 _model_cache = {}
 _tokenizer = None
-MODEL_PATH = config["model_path"]
+MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../models/mistral_7b_4bit_local"))
 
 
 # get model funtions allows to load the model only once
@@ -33,7 +33,8 @@ def get_model(device_id):
             MODEL_PATH,
             quantization_config=bnb_config,
             device_map={"": device_id},
-            torch_dtype=torch.float16
+            torch_dtype=torch.float16,
+            local_files_only=True
         ).eval()
         
     return _model_cache[device_id]
@@ -42,5 +43,5 @@ def get_model(device_id):
 def get_tokenizer():
     global _tokenizer
     if _tokenizer is None:
-        _tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+        _tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH,local_files_only=True,use_fast=False)
     return _tokenizer
