@@ -12,6 +12,7 @@ n_heads = config["n_heads"]
 n_dim = config["n_dim"]
 num_layers = config["num_layers"]
 max_seq_len = 120
+vocab_tokens = config["vocab_tokens"]
 
 decode_device = "cuda:0"
 prefill_device = "cuda:1"
@@ -23,8 +24,9 @@ def kv_cache_allocator(req_id, prompt, page_table):
         # allocate empty space
         k_tensor = torch.empty([batch_size,n_heads,max_seq_len,n_dim] , dtype=torch.float16, device=decode_device)
         v_tensor = torch.empty_like(k_tensor)
-
-        final_layer_logits = torch.empty([],dtype=torch.float16, device=decode_device)
+        
+        # final logits shape check..
+        final_layer_logits = torch.empty([batch_size,],dtype=torch.float16, device=decode_device)
 
         # address ptr
         k_ptr = k_tensor.data_ptr()
