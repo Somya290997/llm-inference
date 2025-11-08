@@ -24,8 +24,8 @@ decode_device = "cuda:0"
 prefill_device = "cuda:1"
 
 
-model = model_loader.get_model(prefill_device)
-tokenizer = model_loader.get_tokenizer(prefill_device)
+model = model_loader.get_model(decode_device)
+tokenizer = model_loader.get_tokenizer()
 
 # KV cache creator
 def kv_cache_collection(req_id,num_layers,page_table):

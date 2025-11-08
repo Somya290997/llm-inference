@@ -31,7 +31,7 @@ def get_model(device_id):
 
         _model_cache[device_id] = AutoModelForCausalLM.from_pretrained(
             MODEL_PATH,
-            quantization_config=bnb_config,
+            # quantization_config=bnb_config,
             device_map={"": device_id},
             torch_dtype=torch.float16,
             local_files_only=True
