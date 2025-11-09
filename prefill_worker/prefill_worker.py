@@ -41,48 +41,6 @@ def _load_model_once():
     return _model, _tokenizer
 
 
-def kv_cache_allocator(req_id, max_seq_len, page_table):
-    
-    torch.cuda.set_device(0)
-    kv_cache = {} 
-    
-    for layer_idx in range(int(num_layers)):
-        # allocate empty space
-        k_tensor = torch.empty([batch_size,n_heads,max_seq_len,n_dim] , dtype=torch.float16, device=decode_device)
-        v_tensor = torch.empty_like(k_tensor)
-
-        # address ptr
-        k_ptr = k_tensor.data_ptr()
-        
-        if layer_idx == 0:
-            print(f"The kv_cache_allocation {k_ptr}")
-            
-        v_ptr = v_tensor.data_ptr()
-
-        kv_cache[layer_idx] = {
-            "K_address" : k_ptr,
-            "V_address" : v_ptr,
-            "dtype" : torch.float16,
-            "max_seq_len" : max_seq_len
-        }
-
-        # print(f"KV cache of layer {layer_idx} is placed on {decode_device}")
-    final_layer_logits = torch.empty([batch_size,vocab_tokens],dtype=torch.float16, device=decode_device)
-    
-
-    page_table[req_id] = {
-        "kv_cache" : kv_cache,
-        "last_logit_layer" : final_layer_logits.data_ptr()
-    }
-
-    if req_id in page_table:
-        print(f"are there any keys in this in KV cache allocator {page_table[req_id].keys()}")
-    else:
-        print(f"[Error] req_id {req_id} not found in page_table_entry")
-
-
-
-
 def prefill_stage(req_id, prompt, page_table):
 
     torch.cuda.set_device(1)
@@ -90,56 +48,36 @@ def prefill_stage(req_id, prompt, page_table):
     
     # tokenizing the input
     input = tokenizer( prompt,return_tensors="pt",max_length=120,truncation=True).to(prefill_device)
-
-    # allocate KV cache
     max_seq_len = input["input_ids"].shape[1]
 
-    kv_cache_allocator(req_id,max_seq_len,page_table)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] Prefill START {req_id}", flush=True)
 
-    print(f"KV cache is allocated in {decode_device}")
-    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] Prefill START {req_id}", flush=True) 
-    
-    if req_id in page_table:
-        print(f"are there any keys in this in prefill  {page_table[req_id].keys()}")
-    else:
-        print(f"[Error] req_id {req_id} not found in page_table_entry")
+    kv_cache = {}
+    page_table[req_id] = {
+        "kv_cache" : kv_cache
+    }
 
     # Create a custom cache class that intercepts updates
     class MonitoredCache(DynamicCache):
         
         def update(self, key_states, value_states, layer_idx, cache_kwargs=None):
             
-            if layer_idx == 0:
-                print(key_states.shape)
-                print(key_states.flatten()[:10])
-                elem_bytes = key_states.element_size()   # should be 2 for fp16
-                numel = key_states.numel()
-                bytes_to_copy = elem_bytes * numel
-                print(bytes_to_copy) 
-                            
-            # Distination of the KV caches
-            try:
-                dst_k_ptr = page_table[req_id]["kv_cache"][layer_idx]["K_address"]
-                if layer_idx == 0:
-                    print(dst_k_ptr)
-                    
-                dst_v_ptr = page_table[req_id]["kv_cache"][layer_idx]["V_address"]
-                
-            except KeyError as e:
-                print(f"[ERROR] Missing KV cache entry: {e}")
-                return super().update(key_states, value_states, layer_idx, cache_kwargs)
-                
+            k_tensor = torch.empty([batch_size,n_heads,max_seq_len,n_dim] , dtype=torch.float16, device=decode_device)
+            v_tensor = torch.empty_like(k_tensor)
+            dst_k_ptr = k_tensor.data_ptr()
+            dst_v_ptr = v_tensor.data_ptr()
+
+            kv_cache[layer_idx] = {
+                "K_address" : dst_k_ptr,
+                "V_address" : dst_v_ptr
+            }
+
 
             cp.cuda.runtime.memcpyPeer(
                 dst_k_ptr, 0,              # destination address (on cuda:0)
                 key_states.data_ptr(), 1,              # source address (on cuda:1)
                 key_states.numel() * key_states.element_size()  # size in bytes
-                                 # kind = 3 → device-to-device
             )
-
-            # time.sleep(10)
-            torch.cuda.synchronize(1)
-            torch.cuda.synchronize(0)
 
             if layer_idx == 0:
                 mem = cp.cuda.UnownedMemory(dst_k_ptr,  key_states.numel() * key_states.element_size(), owner=None)
@@ -156,15 +94,11 @@ def prefill_stage(req_id, prompt, page_table):
                 print("Pointer-read slice:", dst_from_ptr.flatten()[:10])
                 
                 
-
             cp.cuda.runtime.memcpyPeer(
                 dst_v_ptr,   0,            # destination address (on cuda:0)
                 value_states.data_ptr(),   1,            # source address (on cuda:1)
                 value_states.numel() * value_states.element_size()  # size in bytes
-                     # kind = 3 → device-to-device
             )
-
-            torch.cuda.synchronize(prefill_device)
 
             # print(f" layer {layer_idx} has been copied to the dstinations")
         
@@ -179,9 +113,14 @@ def prefill_stage(req_id, prompt, page_table):
             use_cache=True
         )
 
-    dst_logits_ptr = page_table[req_id]["last_logit_layer"]
+    logits = torch.empty([batch_size,vocab_tokens],dtype=torch.float16, device=decode_device)
+    dst_logits_ptr = logits.data_ptr()
+
+    page_table[req_id] = {
+        "last_logit_token" : dst_logits_ptr
+    }
+
     src_logits_ptr = outputs.logits[:,-1,:]
-    print(f" Shape {src_logits_ptr.shape}")
 
     cp.cuda.runtime.memcpyPeer(
         dst_logits_ptr, 0,
