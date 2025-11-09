@@ -13,8 +13,8 @@ import cupy as cp
 
 # Multithreading things.
 import threading
-from threading import Thread
 from queue import Queue
+from threading import Thread, Event
 
 # To queue in the request from the user
 def user_input(intial_requests_queue: Queue, line: str, id: int):
@@ -94,12 +94,12 @@ def worker2(page_table: dict, prefill_ready_queue: Queue, decode_ready_queue: Qu
                 print(f"[Worker2 ERROR] req_id {curr_request['req_id']} still missing in page_table after 1s")
                 return
             time.sleep(0.01)
-        print(f"{curr_request['req_id']} found in page_table")
+        print(f"{curr_request['req_id']} found in page_table in worker2 ")
         
         prefill_completed_req_id = prefill_worker.prefill_stage(
             curr_request["req_id"], 
             curr_request["prompt"],
-            page_table[curr_request['req_id']],  
+            page_table,  
         )
 
         decode_ready_queue.put(prefill_completed_req_id)
@@ -132,8 +132,9 @@ def worker3(page_table: dict , decode_ready_queue: Queue, output_queue: Queue, s
         except Exception as e:
             print(f"[Worker3 ERROR] {e}")
             continue
-        
-        res = decode_worker.decode_phase(prefill_request, page_table)
+        print("Decode Started")
+        res = decode_worker.decode_phase(prefill_request['req_id'], page_table)
+        print("Decode Ended")
         output_queue.put(res)
         
 def result_serving(output_queue: Queue, clear_space: Queue, stop_event: Event):
@@ -169,7 +170,14 @@ def result_serving(output_queue: Queue, clear_space: Queue, stop_event: Event):
 
 if __name__ == "__main__":
 
-    page_table = {}
+    page_table = {} 
+
+    import cupy as cp
+
+    for i in range(2):
+        for j in range(2):
+            if i != j:
+                print(f"GPU{i} → GPU{j}: {cp.cuda.runtime.deviceCanAccessPeer(i,j)}")
 
     # To enable peer to peer processses.
 
@@ -190,6 +198,18 @@ if __name__ == "__main__":
     #                     if e.status != cp.cuda.runtime.cudaErrorPeerAccessAlreadyEnabled:
     #                         raise
 
+    for i in range(2):
+        for j in range(2):
+            if i != j:
+                try:
+                    with cp.cuda.Device(i):
+                        cp.cuda.runtime.deviceEnablePeerAccess(j)
+                    print(f"[P2P] Enabled {i}->{j}")
+                except cp.cuda.runtime.CUDARuntimeError as e:
+                    if e.status == cp.cuda.runtime.cudaErrorPeerAccessAlreadyEnabled:
+                        print(f"[P2P] Already enabled {i}->{j}")
+                    else:
+                        print(f"[P2P] ERROR enabling {i}->{j}: {e}")
     
     # Queue for incoming request
     intial_requests_queue = Queue()
@@ -207,7 +227,7 @@ if __name__ == "__main__":
     clear_space = Queue()
 
     #Events
-    stop_event = threading.Event()
+    stop_event = Event()
 
     # start workers
     p1 = Thread(target=worker1, args=(page_table, intial_requests_queue, prefill_ready_queue, stop_event), daemon=True)
@@ -223,14 +243,14 @@ if __name__ == "__main__":
     pres.start()
     # space.start()
 
-    str1 = '''If the main process exits abruptly (e.g. because of an incoming signal), Python’s multiprocessing sometimes fails to clean up its children. It’s a known caveat, so if you’re seeing any resource leaks after interrupting the interpreter, it probably means that this has just happened to you.'''
+    str1 = '''Can you tell me something about the Machine Learning? '''
 
     user_input(intial_requests_queue, str1,1)
     # user_input(intial_requests_queue, "str2",2)
     # user_input(intial_requests_queue, "str3",3)
 
 
-    time.sleep(60)
+    time.sleep(600)
     stop_event.set()
     print("Main process exiting.", flush=True)
 

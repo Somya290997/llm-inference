@@ -1,4 +1,5 @@
 # Required Modules
+import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 from transformers.cache_utils import DynamicCache
@@ -43,10 +44,10 @@ def prefill_stage(req_id, prompt, page_table):
     model, tokenizer = _load_model_once()
     
     # tokenizing the input
-    input = tokenizer(prompt, return_tensors="pt", truncation=True)
+    input = tokenizer( prompt,return_tensors="pt",max_length=120,truncation=True).to(prefill_device)
 
     # MOVE INPUT TO PREFILL DEVICE (NEW)
-    input = {k: v.to(prefill_device) for k, v in input.items()}
+    # input = {k: v.to(prefill_device) for k, v in input.items()}
 
    
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] Prefill START {req_id}", flush=True) 
@@ -73,12 +74,12 @@ def prefill_stage(req_id, prompt, page_table):
                 print(f"[ERROR] Missing KV cache entry: {e}")
                 return super().update(key_states, value_states, layer_idx, cache_kwargs)
                 
-            print(f"key_states device: {key_states.device} and shape {key_states.shape}")
-            print(f"value_states device: {value_states.device} and shape {key_states.shape}")
-            print(key_states.dtype)
-            print(f"[DEBUG] dst_k_ptr = {dst_k_ptr}")
-            print(f"[DEBUG] src_k_ptr = {key_states.data_ptr()}")
-            print(f"[DEBUG] size = {key_states.numel() * key_states.element_size()}")
+            # print(f"key_states device: {key_states.device} and shape {key_states.shape}")
+            # print(f"value_states device: {value_states.device} and shape {key_states.shape}")
+            # print(key_states.dtype)
+            # print(f"[DEBUG] dst_k_ptr = {dst_k_ptr}")
+            # print(f"[DEBUG] src_k_ptr = {key_states.data_ptr()}")
+            # print(f"[DEBUG] size = {key_states.numel() * key_states.element_size()}")
 
             # key_states = key_states.contiguous()
             # value_states = value_states.contiguous()
@@ -130,17 +131,17 @@ def prefill_stage(req_id, prompt, page_table):
         )
 
     dst_logits_ptr = page_table[req_id]["last_logit_layer"]
+    src_logits_ptr = outputs.logits[:,-1,:]
+    print(f" Shape {src_logits_ptr.shape}")
 
-    with cp.cuda.Device(1):
-        cp.cuda.runtime.memcpy(
-            dst_logits_ptr,
-            outputs.logits[:,-1,:].data_ptr(),
-            outputs.logits[:,-1,:].numel() * outputs.logits[:,-1,:].element_size(),
-            3
-        )
+    cp.cuda.runtime.memcpyPeer(
+        dst_logits_ptr, 0,
+        src_logits_ptr.data_ptr(), 1,
+        src_logits_ptr.numel() * src_logits_ptr.element_size()
+    )
     
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] Prefill END {req_id}", flush=True)
-    return req_id
+    return {"req_id":req_id , "prompt": prompt }
 
 
 

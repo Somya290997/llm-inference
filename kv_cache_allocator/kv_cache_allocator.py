@@ -17,31 +17,24 @@ vocab_tokens = config["vocab_tokens"]
 decode_device = "cuda:0"
 prefill_device = "cuda:1"
 
-local_tensor_store = {} 
 
 def kv_cache_allocator(req_id, prompt, page_table):
     # req_id = str(req_id)
     kv_cache = {} 
-    kv_tensor_refs = {} 
     for layer_idx in range(int(num_layers)):
         
         # allocate empty space
         k_tensor = torch.empty([batch_size,n_heads,max_seq_len,n_dim] , dtype=torch.float16, device=decode_device)
         v_tensor = torch.empty_like(k_tensor)
 
-        print(f"key_states device: {k_tensor.device} and shape {k_tensor.shape}")
-        print(f"value_states device: {v_tensor.device} and shape {v_tensor.shape}")
-        print("size", k_tensor.numel() * k_tensor.element_size())
+        # print(f"key_states device: {k_tensor.device} and shape {k_tensor.shape}")
+        # print(f"value_states device: {v_tensor.device} and shape {v_tensor.shape}")
+        # print("size", k_tensor.numel() * k_tensor.element_size())
         # final logits shape check..
 
         # address ptr
         k_ptr = k_tensor.data_ptr()
         v_ptr = v_tensor.data_ptr()
-
-        kv_tensor_refs[layer_idx] = {
-            "K_tensor": k_tensor,
-            "V_tensor": v_tensor
-        }
 
         kv_cache[layer_idx] = {
             "K_address" : k_ptr,
@@ -53,10 +46,6 @@ def kv_cache_allocator(req_id, prompt, page_table):
         # print(f"KV cache of layer {layer_idx} is placed on {decode_device}")
     final_layer_logits = torch.empty([batch_size,vocab_tokens],dtype=torch.float16, device=decode_device)
     
-    local_tensor_store[req_id] = {
-        "kv_tensor_refs": kv_tensor_refs,
-        "logits_tensor": final_layer_logits
-    }
 
     page_table[req_id] = {
         "kv_cache" : kv_cache,
