@@ -43,7 +43,8 @@ def prefill_stage(req_id, prompt, page_table):
     model, tokenizer = _load_model_once()
     
     # tokenizing the input
-    input = tokenizer(prompt, return_tensors="pt", max_length=119, truncation=True)
+    input = tokenizer(prompt, return_tensors="pt", truncation=True)
+
     # MOVE INPUT TO PREFILL DEVICE (NEW)
     input = {k: v.to(prefill_device) for k, v in input.items()}
 

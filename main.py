@@ -1,15 +1,20 @@
 # Import Modules
 
 import torch
-from torch.multiprocessing import Process, Queue, Event
+# from torch.multiprocessing import Process, Queue, Event
 # from multiprocessing import Event
+import threading
 from datetime import datetime
 import time
 import uuid
 import os
 from multiprocessing import Manager
 import cupy as cp
-import queue
+
+# Multithreading things.
+import threading
+from threading import Thread
+from queue import Queue
 
 # To queue in the request from the user
 def user_input(intial_requests_queue: Queue, line: str, id: int):
@@ -22,20 +27,26 @@ def user_input(intial_requests_queue: Queue, line: str, id: int):
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INPUT added req_id={req_id}")
 
 # Worker1 to fetch the req from intial_request_queus and alocate KV memory
-def worker1(page_table, intial_requests_queue: Queue, prefill_ready_queue: Queue, stop_event: Event):
+def worker1(page_table: dict, intial_requests_queue: Queue, prefill_ready_queue: Queue, stop_event: Event):
+
+    # To run things in GPU 0
     torch.cuda.set_device(0)
+
     from  kv_cache_allocator import kv_cache_allocator
     import queue
+
     while not stop_event.is_set():
+
         try:
-            request = intial_requests_queue.get()
+            curr_request = intial_requests_queue.get()
         except queue.Empty:
             continue
         except Exception as e:
             print(f"[Worker1 ERROR] {e}")
             continue
-        req_id = request["req_id"]
-        request_output = kv_cache_allocator.kv_cache_allocator(req_id, request["prompt"], page_table)
+
+        req_id = curr_request["req_id"]
+        request_output = kv_cache_allocator.kv_cache_allocator(req_id, curr_request["prompt"], page_table)
         timeout = 1.0
         start = time.time()
         while req_id not in page_table:
@@ -59,40 +70,38 @@ def worker1(page_table, intial_requests_queue: Queue, prefill_ready_queue: Queue
 #         prefill_completed_req_id = prefill_worker.prefill_stage(request["req_id"], request["prompt"],page_table)
 #         decode_ready_queue.put(prefill_completed_req_id)
 
-def worker2(page_table, prefill_ready_queue: Queue, decode_ready_queue: Queue, stop_event: Event):
+def worker2(page_table: dict, prefill_ready_queue: Queue, decode_ready_queue: Queue, stop_event: Event):
+
     torch.cuda.set_device(1)
+
     from prefill_worker import prefill_worker
     import queue
+
     while not stop_event.is_set():
         try:
-            request = prefill_ready_queue.get(timeout=0.1)
+            curr_request = prefill_ready_queue.get(timeout=0.1)
         except queue.Empty:
             continue
         except Exception as e:
             print(f"[Worker2 ERROR] {e}")
             continue
         
-        # EXTRACT page_table_entry from page_table (using req_id) 
-        
-        # try:
-        #     page_table_entry = page_table[request["req_id"]]
-        # except KeyError:
-        #     print(f"[Worker2 ERROR] req_id {request['req_id']} not in page_table")
-        #     continue
         max_wait = 1.0
         start = time.time()
-        while request["req_id"] not in page_table:
+
+        while curr_request["req_id"] not in page_table:
             if time.time() - start > max_wait:
-                print(f"[Worker2 ERROR] req_id {request['req_id']} still missing in page_table after 1s")
+                print(f"[Worker2 ERROR] req_id {curr_request['req_id']} still missing in page_table after 1s")
                 return
             time.sleep(0.01)
-        print(f"{request['req_id']} found in page_table")
+        print(f"{curr_request['req_id']} found in page_table")
         
         prefill_completed_req_id = prefill_worker.prefill_stage(
-            request["req_id"], 
-            request["prompt"],
-            page_table,  # PASS page_table_entry instead of page_table
+            curr_request["req_id"], 
+            curr_request["prompt"],
+            page_table[curr_request['req_id']],  
         )
+
         decode_ready_queue.put(prefill_completed_req_id)
 
 
@@ -108,10 +117,13 @@ def worker2(page_table, prefill_ready_queue: Queue, decode_ready_queue: Queue, s
 #         res = decode_worker.decode_phase(prefill_request,page_table)
 #         output_queue.put(res)
 
-def worker3(page_table, decode_ready_queue: Queue, output_queue: Queue, stop_event: Event):
+def worker3(page_table: dict , decode_ready_queue: Queue, output_queue: Queue, stop_event: Event):
+
     torch.cuda.set_device(0)
+
     from decode_worker import decode_worker
     import queue
+
     while not stop_event.is_set():
         try:
             prefill_request = decode_ready_queue.get(timeout=0.1)
@@ -156,19 +168,10 @@ def result_serving(output_queue: Queue, clear_space: Queue, stop_event: Event):
 
 
 if __name__ == "__main__":
-    from multiprocessing import Manager
-    import cupy as cp
-    
-    manager = Manager()
-    page_table = manager.dict()
 
-    from models import model_loader
-    prefill_model = model_loader.get_model("cuda:1")
-    decode_model = model_loader.get_model("cuda:0")
-    prefill_tokenizer = model_loader.get_tokenizer()
-    
-    import torch.multiprocessing as mp
-    mp.set_start_method('spawn', force=True)
+    page_table = {}
+
+    # To enable peer to peer processses.
 
     # for i in range(torch.cuda.device_count()):
     #     for j in range(torch.cuda.device_count()):
@@ -194,22 +197,24 @@ if __name__ == "__main__":
     #Queue for reqs that are prefill ready
     prefill_ready_queue = Queue()
 
+    #Queue for reqs that are decode ready
     decode_ready_queue = Queue()
 
-    # Queue for reqs ready for decode
+    # Queue for reqs ready for output
     output_queue = Queue()
 
     # Queue to clear the KV_allocated space
     clear_space = Queue()
 
-    #Events 
-    stop_event = Event()
+    #Events
+    stop_event = threading.Event()
 
     # start workers
-    p1 = Process(target=worker1, args=(page_table, intial_requests_queue, prefill_ready_queue, stop_event), daemon=True)
-    p2 = Process(target=worker2, args=(page_table, prefill_ready_queue, decode_ready_queue, stop_event), daemon=False)
-    p3 = Process(target=worker3, args=(page_table, decode_ready_queue, output_queue, stop_event), daemon=False)
-    pres = Process(target=result_serving, args=(output_queue, clear_space, stop_event), daemon=True)
+    p1 = Thread(target=worker1, args=(page_table, intial_requests_queue, prefill_ready_queue, stop_event), daemon=True)
+    p2 = Thread(target=worker2, args=(page_table, prefill_ready_queue, decode_ready_queue, stop_event), daemon=False)
+    p3 = Thread(target=worker3, args=(page_table, decode_ready_queue, output_queue, stop_event), daemon=False)
+
+    pres = Thread(target=result_serving, args=(output_queue, clear_space, stop_event), daemon=True)
     # space = Process(target=clear_worker, args=(clear_space,stop_event), daemon=True)
 
     p1.start()
