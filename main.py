@@ -30,7 +30,7 @@ def user_input(intial_requests_queue: Queue, line: str, id: int):
 def worker1(page_table: dict, intial_requests_queue: Queue, prefill_ready_queue: Queue, stop_event: Event):
 
     # To run things in GPU 0
-    torch.cuda.set_device(0)
+    # torch.cuda.set_device(0)
 
     from  kv_cache_allocator import kv_cache_allocator
     import queue
@@ -49,11 +49,11 @@ def worker1(page_table: dict, intial_requests_queue: Queue, prefill_ready_queue:
         request_output = kv_cache_allocator.kv_cache_allocator(req_id, curr_request["prompt"], page_table)
         timeout = 1.0
         start = time.time()
-        while req_id not in page_table:
-            if time.time() - start > timeout:
-                print(f"[Worker1 ERROR] req_id {req_id} still not in page_table after 1s")
-                return
-            time.sleep(0.01)
+        # while req_id not in page_table:
+        #     if time.time() - start > timeout:
+        #         print(f"[Worker1 ERROR] req_id {req_id} still not in page_table after 1s")
+        #         return
+        #     time.sleep(0.01)
             
         print("[Allocator] page_table keys:", page_table.keys())
         prefill_ready_queue.put(request_output)
@@ -72,7 +72,7 @@ def worker1(page_table: dict, intial_requests_queue: Queue, prefill_ready_queue:
 
 def worker2(page_table: dict, prefill_ready_queue: Queue, decode_ready_queue: Queue, stop_event: Event):
 
-    torch.cuda.set_device(1)
+    # torch.cuda.set_device(1)
 
     from prefill_worker import prefill_worker
     import queue
@@ -86,15 +86,15 @@ def worker2(page_table: dict, prefill_ready_queue: Queue, decode_ready_queue: Qu
             print(f"[Worker2 ERROR] {e}")
             continue
         
-        max_wait = 1.0
-        start = time.time()
+        # max_wait = 1.0
+        # start = time.time()
 
-        while curr_request["req_id"] not in page_table:
-            if time.time() - start > max_wait:
-                print(f"[Worker2 ERROR] req_id {curr_request['req_id']} still missing in page_table after 1s")
-                return
-            time.sleep(0.01)
-        print(f"{curr_request['req_id']} found in page_table in worker2 ")
+        # while curr_request["req_id"] not in page_table:
+        #     if time.time() - start > max_wait:
+        #         print(f"[Worker2 ERROR] req_id {curr_request['req_id']} still missing in page_table after 1s")
+        #         return
+        #     time.sleep(0.01)
+        # print(f"{curr_request['req_id']} found in page_table in worker2 ")
         
         prefill_completed_req_id = prefill_worker.prefill_stage(
             curr_request["req_id"], 
@@ -119,7 +119,7 @@ def worker2(page_table: dict, prefill_ready_queue: Queue, decode_ready_queue: Qu
 
 def worker3(page_table: dict , decode_ready_queue: Queue, output_queue: Queue, stop_event: Event):
 
-    torch.cuda.set_device(0)
+    # torch.cuda.set_device(0)
 
     from decode_worker import decode_worker
     import queue
