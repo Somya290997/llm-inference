@@ -1,12 +1,18 @@
 class PageTable:
 
-    '''Stores KV cache Locations and metadata per request'''
-
     def __init__(self):
         self.table = {}
 
-    def init_request(self,req_id,num_layers):
+    def __getitem__(self, req_id):
+        return self.table[req_id]
 
+    def __setitem__(self, req_id, value):
+        self.table[req_id] = value
+
+    def __contains__(self, req_id):
+        return req_id in self.table
+
+    def init_request(self,req_id,num_layers):
         self.table[req_id]={
             "cpu_kv" : {},
             "gpu_kv" : {},
@@ -32,5 +38,3 @@ class PageTable:
             "K": k_gpu,
             "V": v_gpu,
         }
-
-        

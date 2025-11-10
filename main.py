@@ -25,6 +25,7 @@ def user_input(intial_requests_queue: Queue, line: str, id: int):
         "prompt": line
     })
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INPUT added req_id={req_id}")
+    
 
 # Worker1 to fetch the req from intial_request_queus and alocate KV memory
 def worker1(page_table: dict, intial_requests_queue: Queue, prefill_ready_queue: Queue, stop_event: Event):

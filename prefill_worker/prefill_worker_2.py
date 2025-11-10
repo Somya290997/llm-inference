@@ -15,6 +15,9 @@ with open("config/model_config.yaml", "r") as f:
 decode_device = "cuda:0"
 prefill_device = "cuda:1"
 
+_model = None
+_tokenizer = None
+
 def enable_p2p():
     for i in range(2):
         for j in range(2):
@@ -66,6 +69,7 @@ def prefill_stage(req_id,prompt,page_table):
             v_clone = value_states.contiguous().detach().to("cpu")
 
             _cpu_kv_manager.write_layer(req_id, layer_idx, k_clone, v_clone)
+            page_table.set_cpu_kv(req_id, layer_idx, k_clone, v_clone)
 
             if layer_idx == 0:
                 print(f"[Prefill] Layer 0 CPU KV written. slice={k_clone.flatten()[:10]}")
