@@ -3,8 +3,13 @@ from datetime import datetime
 from transformers import AutoTokenizer
 from transformers.cache_utils import DynamicCache
 
+DEBUG_DECODE = True
+
 _model = None
 _tokenizer = None
+
+decode_device = "cuda:0"
+prefill_device = "cuda:1"
 
 def _load_model_once():
     """Load model ONCE when first called"""
@@ -12,60 +17,50 @@ def _load_model_once():
     
     if _model is None:
         from models import model_loader
-        print(f"[Decode] Loading model on cuda:0...")
+        print(f"[Decode] Loading model on cuda:0...") if DEBUG_DECODE else None
         _model = model_loader.get_model("cuda:0")
         _tokenizer = model_loader.get_tokenizer()
-        print(f"[Decode] Model loaded ✓")
+        print(f"[Decode] Model loaded") if DEBUG_DECODE else None
     
     return _model, _tokenizer
 
 
-def decode_stage(req_id, page_table):
+def decode_stage(req_id, page_table, cpu_kv_manager):
 
-    torch.cuda.set_device(1)
+
+    torch.cuda.set_device(decode_device)
     model , tokenizer = _load_model_once()
 
-    entry = page_table.table[req_id]
-    num_layers = entry["num_layers"]
-    seq_len = entry["seq_len"]
-    # cpu_layers = entry["cpu_kv"]
 
-    print(f"[Decode] START for req {req_id}")
+    req_details = page_table.table[req_id]
+    num_layers = req_details["num_layers"]
+    seq_len = page_table[req_id]["seq_len"]
 
-    gpu_kv = {}
-
-    cpu_layers = page_table[req_id]["cpu_kv"]
+    print(f"[Decode] Started loading the KV cache for req {req_id} ") if DEBUG_DECODE else None
 
     past_key_values = DynamicCache()
 
     for layer_id in range(num_layers):
-    
-        # ✅ FIXED
-        k_cpu = cpu_layers[layer_id]["K"]
-        v_cpu = cpu_layers[layer_id]["V"]
-    
-        # Now both are CPU tensors
-        Kgpu = torch.empty_like(k_cpu, device="cuda:0")
-        Vgpu = torch.empty_like(v_cpu, device="cuda:0")
-    
-        Kgpu.copy_(k_cpu, non_blocking=True)
-        Vgpu.copy_(v_cpu, non_blocking=True)
 
-        if layer_id == 0 :  
-            print(f"[Decode] Layer0 copy: slice={Kgpu.flatten()[:10]}")
+        hidden_dim = model.config.hidden_size // model.config.num_attention_heads
+        shape = (1, model.config.num_attention_heads, seq_len, hidden_dim)
 
-        past_key_values.update(Kgpu,Vgpu,layer_id,cache_kwargs=None)
-    
-        # optionally store GPU KV for decoder
-        # page_table.set_gpu_kv(req_id, layer_id, Kgpu, Vgpu)
-    
+        k_tensor , v_tensor = page_table.get_kv_gpu(req_id=req_id, layer=layer_id , shape=shape , device=decode_device ,cpu_kv_manager=cpu_kv_manager)
 
+        if layer_id == 0 and DEBUG_DECODE :  
+            print(f"[Decode] Layer0 copy: slice={k_tensor.flatten()[:10]}")
 
-    print(f"[Decode] All KV copied. Starting token generation...")
+        past_key_values.update(k_tensor,v_tensor,layer_id,cache_kwargs=None)
 
-    # ----- simple generate -----
-    last_token_logits = entry["logits_cpu"]
-    # next_token = torch.argmax(logits_cpu, dim=-1) 
+    print(f"[Decode] Loading the KV cache completed for req {req_id}") if DEBUG_DECODE else None
+
+    torch.cuda.synchronize(decode_device)
+
+    last_token_logits = page_table.get_logits_kv_gpu(req_id=req_id,device=decode_device,shape=(1, model.config.vocab_size) ,cpu_kv_manager=cpu_kv_manager)
+
+    print(f"[Decode] last_token_logits collection completed  for req ... {req_id} ") if DEBUG_DECODE else None
+
+    print(f"[Decode] Starting token generation... for {req_id} ") if DEBUG_DECODE else None
 
     generated_tokens = []
     max_output_len = 120
@@ -102,7 +97,7 @@ def decode_stage(req_id, page_table):
     
             # 8. Update next-step logits + KV cache
             last_token_logits = output.logits[:, -1, :]       # always shape (1, vocab_size)
-            formed_KV_caches = output.past_key_values         # updated KV
+            past_key_values = output.past_key_values         # updated KV
     
     sentence = "".join(generated_tokens)
     print(sentence)
@@ -111,6 +106,33 @@ def decode_stage(req_id, page_table):
 
     # print(f"[Decode] first token = {next_token}")
     # print(f"[Decode] DONE")
+
+    # gpu_kv = {}
+
+    # cpu_layers = page_table[req_id]["cpu_kv"]
+
+    # past_key_values = DynamicCache()
+
+    # for layer_id in range(num_layers):
+    
+    #     # ✅ FIXED
+    #     k_cpu = cpu_layers[layer_id]["K"]
+    #     v_cpu = cpu_layers[layer_id]["V"]
+    
+    #     # Now both are CPU tensors
+    #     Kgpu = torch.empty_like(k_cpu, device="cuda:0")
+    #     Vgpu = torch.empty_like(v_cpu, device="cuda:0")
+    
+    #     Kgpu.copy_(k_cpu, non_blocking=True)
+    #     Vgpu.copy_(v_cpu, non_blocking=True)
+
+    #     if layer_id == 0 :  
+    #         print(f"[Decode] Layer0 copy: slice={Kgpu.flatten()[:10]}")
+
+    #     past_key_values.update(Kgpu,Vgpu,layer_id,cache_kwargs=None)
+    
+        # optionally store GPU KV for decoder
+        # page_table.set_gpu_kv(req_id, layer_id, Kgpu, Vgpu)
 
 
 

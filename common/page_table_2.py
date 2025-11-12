@@ -1,3 +1,5 @@
+import torch
+
 class PageTable:
 
     def __init__(self):
@@ -12,29 +14,56 @@ class PageTable:
     def __contains__(self, req_id):
         return req_id in self.table
 
-    def init_request(self,req_id,num_layers):
+    def init_request(self,req_id, num_layers, seq_len, shape, dtype = torch.float16):
+
         self.table[req_id]={
-            "cpu_kv" : {},
-            "gpu_kv" : {},
-            "seq_len": 0,
+            "layers" : {},
+            "logits" : [],
             "num_layers": num_layers,
-            "logits_cpu": None,
-            "logits_gpu_ptr": None,
-            "ready_layers": 0,
+            "seq_len" : seq_len,
+            "shape": shape,
+            "dtype": dtype,
+            "allocated": 0,
             "decode_can_start": False,
         }
+
+    def set_kv_cpu(self, req_id, layer, k_tensor, v_tensor, cpu_kv_manager):
+
+        k_block_ids , v_block_ids = cpu_kv_manager.write_layer(k_tensor,v_tensor)
+
+        self.table[req_id]["layers"][layer] = {
+            "K": k_block_ids, 
+            "V": v_block_ids
+        }
     
-    def set_cpu_kv(self, req_id, layer, k_cpu, v_cpu):
-        self.table[req_id]["cpu_kv"][layer] = {
-            "K": k_cpu, 
-            "V": v_cpu
-        }
 
-    def get_cpu_kv(self, req_id, layer):
-        return self.table[req_id]["cpu_kv"][layer]
+    def set_logits_kv_cpu(self,req_id,logits,cpu_kv_manager):
 
-    def set_gpu_kv(self, req_id, layer, k_gpu, v_gpu):
-        self.table[req_id]["gpu_kv"][layer] = {
-            "K": k_gpu,
-            "V": v_gpu,
-        }
+        logits_block_ids = cpu_kv_manager.write_logits(logits)
+        self.table[req_id]["logits"] = logits_block_ids
+
+
+    def get_kv_gpu(self, req_id, layer,shape, device,cpu_kv_manager):
+
+        k_block_ids = self.table[req_id]["layers"][layer]["K"]
+        v_block_ids = self.table[req_id]["layers"][layer]["V"]
+
+        k_tensor , v_tensor = cpu_kv_manager.read_layer(k_block_ids,v_block_ids,shape,device)
+
+        return k_tensor , v_tensor
+    
+    def get_logits_kv_gpu(self,req_id,device,shape,cpu_kv_manager):
+
+        logits_block_ids = self.table[req_id]["logits"]
+        logits = cpu_kv_manager.read_logits(logits_block_ids,shape,device)
+        return logits
+        
+
+    def free_req(self,req_id,cpu_kv_manager):
+
+        for layer_id in range(self.table[req_id]["num_layers"]):
+            k_block_ids = self.table[req_id][layer_id]["K"]
+            v_block_ids = self.table[req_id][layer_id]["V"]
+            cpu_kv_manager.free_layer(k_block_ids,v_block_ids)
+
+        del self.table[req_id]
