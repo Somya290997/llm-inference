@@ -3,7 +3,7 @@ from datetime import datetime
 from transformers import AutoTokenizer
 from transformers.cache_utils import DynamicCache
 
-DEBUG_DECODE = True
+DEBUG_DECODE = False
 
 _model = None
 _tokenizer = None
@@ -28,7 +28,7 @@ def _load_model_once():
 def decode_stage(req_id, page_table, cpu_kv_manager):
 
 
-    torch.cuda.set_device(decode_device)
+    torch.cuda.set_device(0)
     model , tokenizer = _load_model_once()
 
 
@@ -36,19 +36,20 @@ def decode_stage(req_id, page_table, cpu_kv_manager):
     num_layers = req_details["num_layers"]
     seq_len = page_table[req_id]["seq_len"]
 
-    print(f"[Decode] Started loading the KV cache for req {req_id} ") if DEBUG_DECODE else None
+    decode_start = datetime.now()
+    print(f"[{decode_start.strftime('%H:%M:%S.%f')[:-3]}] Decode START {req_id}") # if DEBUG_DECODE else None
+    
+    hidden_dim = model.config.hidden_size // model.config.num_attention_heads
+    shape = (1, 8, seq_len, hidden_dim) 
 
     past_key_values = DynamicCache()
 
     for layer_id in range(num_layers):
 
-        hidden_dim = model.config.hidden_size // model.config.num_attention_heads
-        shape = (1, model.config.num_attention_heads, seq_len, hidden_dim)
-
         k_tensor , v_tensor = page_table.get_kv_gpu(req_id=req_id, layer=layer_id , shape=shape , device=decode_device ,cpu_kv_manager=cpu_kv_manager)
 
         if layer_id == 0 and DEBUG_DECODE :  
-            print(f"[Decode] Layer0 copy: slice={k_tensor.flatten()[:10]}")
+            print(f"[Decode] Layer {layer_id} copy: slice={k_tensor.flatten()[:10]}")
 
         past_key_values.update(k_tensor,v_tensor,layer_id,cache_kwargs=None)
 
@@ -72,7 +73,7 @@ def decode_stage(req_id, page_table, cpu_kv_manager):
             probs = torch.softmax(last_token_logits, dim=-1)   # (1, vocab_size)
     
             # 2. Top-k filter (k = 10 here)
-            topk_probs, topk_idx = torch.topk(probs, k=10, dim=-1)  # both (1, 10)
+            topk_probs, topk_idx = torch.topk(probs, k=2, dim=-1)  # both (1, 10)
     
             # 3. Normalize the top-k distribution
             topk_probs = topk_probs / topk_probs.sum(dim=-1, keepdim=True)
@@ -98,41 +99,18 @@ def decode_stage(req_id, page_table, cpu_kv_manager):
             # 8. Update next-step logits + KV cache
             last_token_logits = output.logits[:, -1, :]       # always shape (1, vocab_size)
             past_key_values = output.past_key_values         # updated KV
+
+    decode_end = datetime.now()
+    decode_ms = (decode_end - decode_start).total_seconds() * 1000
+
+    print(f"[{decode_end.strftime('%H:%M:%S.%f')[:-3]}] Decode END {req_id}  (took {decode_ms:.2f} ms)")
     
     sentence = "".join(generated_tokens)
     print(sentence)
-
-    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] decode END {req_id}", flush=True)
-
-    # print(f"[Decode] first token = {next_token}")
-    # print(f"[Decode] DONE")
-
-    # gpu_kv = {}
-
-    # cpu_layers = page_table[req_id]["cpu_kv"]
-
-    # past_key_values = DynamicCache()
-
-    # for layer_id in range(num_layers):
     
-    #     # ✅ FIXED
-    #     k_cpu = cpu_layers[layer_id]["K"]
-    #     v_cpu = cpu_layers[layer_id]["V"]
     
-    #     # Now both are CPU tensors
-    #     Kgpu = torch.empty_like(k_cpu, device="cuda:0")
-    #     Vgpu = torch.empty_like(v_cpu, device="cuda:0")
-    
-    #     Kgpu.copy_(k_cpu, non_blocking=True)
-    #     Vgpu.copy_(v_cpu, non_blocking=True)
 
-    #     if layer_id == 0 :  
-    #         print(f"[Decode] Layer0 copy: slice={Kgpu.flatten()[:10]}")
 
-    #     past_key_values.update(Kgpu,Vgpu,layer_id,cache_kwargs=None)
-    
-        # optionally store GPU KV for decoder
-        # page_table.set_gpu_kv(req_id, layer_id, Kgpu, Vgpu)
 
 
 

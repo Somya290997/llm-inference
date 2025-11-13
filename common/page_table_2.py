@@ -1,5 +1,7 @@
 import torch
 
+DEBUG_PAGE = False
+
 class PageTable:
 
     def __init__(self):
@@ -33,8 +35,11 @@ class PageTable:
 
         self.table[req_id]["layers"][layer] = {
             "K": k_block_ids, 
-            "V": v_block_ids
+            "V": v_block_ids,
+            "numel" : k_tensor.numel()
         }
+        total_layers_now = len(self.table[req_id]["layers"])
+        print(f"[PageTable] req {req_id} now has {total_layers_now} layers stored.") if DEBUG_PAGE else None
     
 
     def set_logits_kv_cpu(self,req_id,logits,cpu_kv_manager):
@@ -49,7 +54,6 @@ class PageTable:
         v_block_ids = self.table[req_id]["layers"][layer]["V"]
 
         k_tensor , v_tensor = cpu_kv_manager.read_layer(k_block_ids,v_block_ids,shape,device)
-
         return k_tensor , v_tensor
     
     def get_logits_kv_gpu(self,req_id,device,shape,cpu_kv_manager):
