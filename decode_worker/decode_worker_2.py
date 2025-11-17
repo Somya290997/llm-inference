@@ -65,9 +65,15 @@ def decode_stage(req_id, page_table, cpu_kv_manager):
 
     generated_tokens = []
     max_output_len = 120
+
+    decode_generation_start = datetime.now()
+
+    ttft_ms = None                # time to first token
+    inter_token_times = []
+    prev_token_time = None  
     
     with torch.no_grad():
-        for _ in range(max_output_len):
+        for step in range(max_output_len):
     
             # 1. Convert logits → probabilities
             probs = torch.softmax(last_token_logits, dim=-1)   # (1, vocab_size)
@@ -88,6 +94,19 @@ def decode_stage(req_id, page_table, cpu_kv_manager):
             token_int = next_token_id.item()
             token_text = tokenizer.decode([token_int], skip_special_tokens=True)
             generated_tokens.append(token_text)
+
+            now = datetime.now()
+    
+            if step == 0:
+                # Time-To-First-Token
+                ttft_ms = (now - decode_generation_start).total_seconds() * 1000
+            else:
+                # Inter-token latency
+                delta_ms = (now - prev_token_time).total_seconds() * 1000
+                inter_token_times.append(delta_ms)
+    
+            # Update previous-token timestamp
+            prev_token_time = now
     
             # 7. Feed into model for next step
             output = model(
@@ -104,6 +123,11 @@ def decode_stage(req_id, page_table, cpu_kv_manager):
     decode_ms = (decode_end - decode_start).total_seconds() * 1000
 
     print(f"[{decode_end.strftime('%H:%M:%S.%f')[:-3]}] Decode END {req_id}  (took {decode_ms:.2f} ms)")
+    avg_tbt_ms = sum(inter_token_times) / len(inter_token_times) if inter_token_times else 0.0
+    
+    print(f"\nAvg TBT (time-between-tokens): {avg_tbt_ms:.2f} ms")
+    print(f"Time-To-First-Token (TTFT): {ttft_ms:.2f} ms")
+
     
     sentence = "".join(generated_tokens)
     print(sentence)

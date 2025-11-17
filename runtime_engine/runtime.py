@@ -20,6 +20,8 @@ class Runtime:
         self.transfer_queue = queue.Queue()
         self.decode_queue = queue.Queue()
 
+        self.cache = None
+
         # Class to manage
         self.cpu_kv_manager = CPUKVBlockManager()
         self.page_table = PageTable()
@@ -49,7 +51,7 @@ class Runtime:
     def prefill_worker(self):
         while True:
             req_id , prompt = self.prefill_queue.get()
-            prefill_stage(req_id=req_id,prompt=prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager,schedular_queue=self.schedular_queue)
+            self.cache = prefill_stage(req_id=req_id,prompt=prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager,schedular_queue=self.schedular_queue)
 
 
     # scheduler_worker
@@ -86,7 +88,7 @@ class Runtime:
             if mode == "full":
                 print(f"[Transfer] Dynamic full transfer for req {req_id}")
                 self.page_table[req_id]["full_transfer_scheduled"] = True
-                KV_cache = transfer_stage(req_id, 0, total_layers - 1,
+                KV_cache = transfer_stage(req_id, 0, total_layers,
                                           self.page_table, self.cpu_kv_manager)
     
                 self.page_table[req_id]["ready_for_decode"] = True

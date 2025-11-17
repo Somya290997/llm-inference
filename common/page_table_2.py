@@ -23,6 +23,7 @@ class PageTable:
         self.table[req_id]={
             "layers" : {},
             "input_ids" : None,
+            "last_layer_logits" : None,
             "num_layers": num_layers,
             "seq_len" : seq_len,
             "shape": shape,

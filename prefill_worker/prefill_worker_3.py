@@ -50,11 +50,12 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
 
     model , tokenizer = _load_model_once()
 
-    inputs1 = tokenizer(prompt, return_tensors="pt")
-    seq_len = inputs1["input_ids"].shape[1]
+    model.eval()
 
-  
-    inputs = tokenizer(prompt, return_tensors="pt").to(prefill_device)
+    inputs = tokenizer(prompt, return_tensors="pt")
+    inputs_gpu = {k: v.to(prefill_device) for k,v in inputs.items()}
+    seq_len = inputs["input_ids"].shape[1]
+    
 
     print(f"Number of tokens in {req_id} is {seq_len} ") if DEBUG_PREFILL else None
 
@@ -66,19 +67,28 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
     page_table.init_request(req_id = req_id, num_layers=model.config.num_hidden_layers, seq_len=seq_len, shape = kv_shape, dtype=torch.float16)
     print(f"[Prefill] for req {req_id} has complete the Page_table_intialization  ") if DEBUG_PREFILL else None
 
-    page_table[req_id]["input_ids"] = inputs1["input_ids"]
-    
+    # page_table[req_id]["input_ids"] = inputs["input_ids"].clone().cpu()
+
     prefill_start = datetime.now()
     print(f"[{prefill_start.strftime('%H:%M:%S.%f')[:-3]}] Prefill START {req_id}") if DEBUG_PREFILL else None
 
+
     class CPUStreamingCache(DynamicCache):
         def update(self, key_states, value_states, layer_idx, cache_kwargs=None):
+            
+            # if "hf_kv" not in page_table[req_id]:
+            #     page_table[req_id]["hf_kv"] = {}
 
-            # Clone to keep alive beyond layer update
-            k_clone = key_states.clone().detach().cpu()
-            v_clone = value_states.clone().detach().cpu()
+            k_clone = key_states.clone().detach().cpu().contiguous()
+            v_clone = value_states.clone().detach().cpu().contiguous()
+    
+            # Store reference copy (on CPU, already contiguous)
+            # page_table[req_id]["hf_kv"][layer_idx] = {
+            #     "k": k_clone,  # Make a copy for reference
+            #     "v": v_clone,
+            # }
 
-            print(f"[Prefill] for req {req_id} shape {k_clone.shape}") if DEBUG_PREFILL and layer_idx == 0 else None 
+            print(f"[Prefill] for req {req_id} shape {key_states.shape}") if DEBUG_PREFILL and layer_idx == 0 else None 
 
             print(f"[Prefill] for req {req_id} has started for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
             page_table.set_kv_cpu(req_id = req_id , layer = layer_idx, k_tensor = k_clone , v_tensor = v_clone, cpu_kv_manager = cpu_kv_manager)
@@ -97,6 +107,7 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
             print(f"[Prefill] for req {req_id} has streamed layer: {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None
 
             return super().update(key_states, value_states, layer_idx, cache_kwargs)
+
     
     cache = CPUStreamingCache()
 
@@ -104,11 +115,14 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
 
     # Forward pass
     with torch.no_grad():
-        outputs = model(**inputs, past_key_values=cache, use_cache=True)
+        outputs = model(**inputs_gpu, past_key_values=cache, use_cache=True)
     # print(f"[prefill] for req {req_id}  {len(page_table[req_id]["layers"])} ")
     print(f"[Prefill] for req {req_id} has completed forward pass") if DEBUG_PREFILL else None
 
-    # logits_cpu = outputs.logits[:, -1, :].detach().to("cpu")
+    logits_cpu = outputs.logits[:, -1, :].detach().to("cpu")
+    print(f"Shape of the logits {logits_cpu.shape}")
+    page_table[req_id]["last_layer_logits"] = logits_cpu
+    
 
     # print(f"[Prefill] for req {req_id} has started for set_logits_kv_cpu") if DEBUG_PREFILL else None 
     # page_table.set_logits_kv_cpu(req_id,logits_cpu,cpu_kv_manager)
@@ -124,6 +138,6 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
     print(
         f"[{prefill_end.strftime('%H:%M:%S.%f')[:-3]}] Prefill END {req_id} "
         f"(took {elapsed_ms:.2f} ms)"
-    ) if DEBUG_PREFILL else None 
-    
+    ) if DEBUG_PREFILL else None
+
     

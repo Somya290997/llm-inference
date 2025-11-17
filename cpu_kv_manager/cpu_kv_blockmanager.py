@@ -23,8 +23,15 @@ class CPUKVBlockManager:
         # Allocate CPU KV for request, but lazy-layer on demand.
      
         block_id = self.next_block_id
-        self.block_pool[block_id] = torch.empty(self.element_per_block,dtype=torch.float16,device='cpu')
         self.next_block_id += 1
+        
+        self.block_pool[block_id] = torch.empty(
+            no_of_elements,
+            dtype=torch.float16,
+            device='cpu',
+            pin_memory=True
+        )
+       
         self.elements_filled_in_block[block_id] = no_of_elements
         return block_id
     
@@ -42,58 +49,81 @@ class CPUKVBlockManager:
 
       
         # Store CPU KV produced by Prefill.
+
+        k_flatten = k_tensor.contiguous().view(-1)
+        v_flatten = v_tensor.contiguous().view(-1)
        
-        k_bytes = k_tensor.numel() * k_tensor.element_size()
-        v_bytes = v_tensor.numel() * v_tensor.element_size()
+        # k_bytes = k_flatten.numel() * k_flatten.element_size()
+        # v_bytes = v_flatten.numel() * v_flatten.element_size()
 
-        no_of_required_blocks_k = math.ceil(k_bytes / self.block_size)
-        no_of_required_blocks_v = math.ceil(v_bytes / self.block_size)
+        # no_of_required_blocks_k = math.ceil(k_bytes / self.block_size)
+        # no_of_required_blocks_v = math.ceil(v_bytes / self.block_size)
 
-        k_flatten = k_tensor.flatten()
-        v_flatten = v_tensor.flatten()
 
         k_block_ids = []
         v_block_ids = []
 
 
-        for i in range(no_of_required_blocks_k):
+        # for i in range(no_of_required_blocks_k):
             
-            start = i * self.element_per_block
-            end = start + self.element_per_block
-            end = min(end,len(k_flatten))
-            no_of_elements = end - start
-            block_id = self.alloc_layer_for_request(no_of_elements)
+        #     start = i * self.element_per_block
+        #     end = start + self.element_per_block
+        #     end = min(end,len(k_flatten))
+        #     no_of_elements = end - start
+        #     block_id = self.alloc_layer_for_request(no_of_elements)
 
-            # print(
-            # f"[DEBUG] alloc size={self.block_pool[block_id].numel()}, "
-            # f"copy size={len(k_flatten[start:end])}, "
-            # f"start={start}, end={end}")
-            # if start >= len(k_flatten): 
-            #     break
+        #     # print(
+        #     # f"[DEBUG] alloc size={self.block_pool[block_id].numel()}, "
+        #     # f"copy size={len(k_flatten[start:end])}, "
+        #     # f"start={start}, end={end}")
+        #     # if start >= len(k_flatten): 
+        #     #     break
             
-            self.block_pool[block_id][:no_of_elements] = k_flatten[start:end]
-            k_block_ids.append(block_id)
+        #     self.block_pool[block_id][:no_of_elements] = k_flatten[start:end]
+        #     k_block_ids.append(block_id)
         
-        for i in range(no_of_required_blocks_v):
+        # for i in range(no_of_required_blocks_v):
             
-            start = i * self.element_per_block
-            end = start + self.element_per_block
-            end = min(end,len(v_flatten))
-            no_of_elements = end - start
-            block_id = self.alloc_layer_for_request(no_of_elements)
+        #     start = i * self.element_per_block
+        #     end = start + self.element_per_block
+        #     end = min(end,len(v_flatten))
+        #     no_of_elements = end - start
+        #     block_id = self.alloc_layer_for_request(no_of_elements)
 
-            # block_id = self.alloc_layer_for_request()
-            # if start >= len(v_flatten): 
-            #     break
-            self.block_pool[block_id][:no_of_elements]  = v_flatten[start:end]
+        #     # block_id = self.alloc_layer_for_request()
+        #     # if start >= len(v_flatten): 
+        #     #     break
+        #     self.block_pool[block_id][:no_of_elements]  = v_flatten[start:end]
+        #     v_block_ids.append(block_id)
+
+        # # print(f"[DEBUG-WRITE] k_tensor.numel()={k_tensor.numel()}, "
+        # #   f"v_tensor.numel()={v_tensor.numel()}, "
+        # #   f"k_bytes={k_bytes}, block_size={self.block_size}, "
+        # #   f"n_blocks_k={no_of_required_blocks_k}, elems_per_block={self.element_per_block}")
+
+        # return k_block_ids , v_block_ids
+
+        offset = 0
+        while offset < len(k_flatten):
+            chunk_size = min(self.element_per_block, len(k_flatten) - offset)
+            block_id = self.alloc_layer_for_request(chunk_size)
+            
+            # Copy data with explicit .copy_() for safety
+            self.block_pool[block_id].copy_(k_flatten[offset:offset + chunk_size])
+            k_block_ids.append(block_id)
+            offset += chunk_size
+        
+        # ✅ FIX: Process V tensor in chunks
+        offset = 0
+        while offset < len(v_flatten):
+            chunk_size = min(self.element_per_block, len(v_flatten) - offset)
+            block_id = self.alloc_layer_for_request(chunk_size)
+            
+            self.block_pool[block_id].copy_(v_flatten[offset:offset + chunk_size])
             v_block_ids.append(block_id)
+            offset += chunk_size
 
-        # print(f"[DEBUG-WRITE] k_tensor.numel()={k_tensor.numel()}, "
-        #   f"v_tensor.numel()={v_tensor.numel()}, "
-        #   f"k_bytes={k_bytes}, block_size={self.block_size}, "
-        #   f"n_blocks_k={no_of_required_blocks_k}, elems_per_block={self.element_per_block}")
-
-        return k_block_ids , v_block_ids
+        return k_block_ids, v_block_ids
     
     def write_logits(self, logits):
 
@@ -126,24 +156,48 @@ class CPUKVBlockManager:
     def read_layer(self, k_block_ids, v_block_ids, shape, device):
     
         total_elems = math.prod(shape)
+        
         k_tensor = torch.empty(total_elems, dtype=torch.float16, device=device)
         v_tensor = torch.empty(total_elems, dtype=torch.float16, device=device)
     
-        # ----- reconstruct K -----
+        # # ----- reconstruct K -----
+        # write_ptr = 0
+        # for block_id in k_block_ids:
+        #     n = self.elements_filled_in_block[block_id]
+        #     k_tensor[write_ptr : write_ptr + n] = self.block_pool[block_id][:n]
+        #     write_ptr += n
+    
+        # # ----- reconstruct V -----
+        # write_ptr = 0
+        # for block_id in v_block_ids:
+        #     n = self.elements_filled_in_block[block_id]
+        #     v_tensor[write_ptr : write_ptr + n] = self.block_pool[block_id][:n]
+        #     write_ptr += n
+    
+        # return k_tensor.contiguous().view(shape), v_tensor.contiguous().view(shape)
+
         write_ptr = 0
         for block_id in k_block_ids:
             n = self.elements_filled_in_block[block_id]
-            k_tensor[write_ptr : write_ptr + n] = self.block_pool[block_id][:n]
+            # ✅ FIX: Use non_blocking=True for async transfer
+            k_tensor[write_ptr:write_ptr + n].copy_(
+                self.block_pool[block_id][:n],
+                non_blocking=True
+            )
             write_ptr += n
-    
-        # ----- reconstruct V -----
+        
+        # Reconstruct V
         write_ptr = 0
         for block_id in v_block_ids:
             n = self.elements_filled_in_block[block_id]
-            v_tensor[write_ptr : write_ptr + n] = self.block_pool[block_id][:n]
+            v_tensor[write_ptr:write_ptr + n].copy_(
+                self.block_pool[block_id][:n],
+                non_blocking=True
+            )
             write_ptr += n
-    
+        
         return k_tensor.view(shape), v_tensor.view(shape)
+
         
     def read_logits(self,logits_block_ids,shape,device):
 
@@ -159,13 +213,12 @@ class CPUKVBlockManager:
         return logits.view(shape)   
 
 
-    def free_layer(self, k_block_ids, v_block_ids):
+    # def free_layer(self, k_block_ids, v_block_ids):
 
-        for block_ids in k_block_ids:
-            del self.block_pool[block_ids]
+    #     for block_ids in k_block_ids:
+    #         del self.block_pool[block_ids]
 
-        for block_ids in v_block_ids:
-            del self.block_pool[block_ids]
-
+    #     for block_ids in v_block_ids:
+    #         del self.block_pool[block_ids]
 
     
