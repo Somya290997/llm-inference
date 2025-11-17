@@ -6,42 +6,44 @@ from transformers.cache_utils import DynamicCache
 
 DEBUG_SCHEDULER = True
 
-def scheduler_stage(req_id, device, dtype, page_table, cpu_kv_manager):
+def scheduler_stage(req_id, device, page_table, cpu_kv_manager):
 
+    print(f"[Scheduler] inside for req {req_id}") if DEBUG_SCHEDULER else None
+    
     total_layers = page_table[req_id]["num_layers"]
-    WARMUP_THRESHOLD = max(2, total_layers // 4)
+    WARMUP_THRESHOLD = max(2, total_layers // 8)
+    layers_on_cpu = page_table.get_layer_at_cpu(req_id)
 
-    while True:
-
-        layers_on_cpu = page_table.get_layers_at_cpu(req_id)
+    if not page_table[req_id]["warmup_done"]:
+        if layers_on_cpu >= WARMUP_THRESHOLD:
+            print(f"[Scheduler] inside for req {req_id} has returned warmed ") if DEBUG_SCHEDULER else None
+            return "warmup"   # run once
+        else:
+            print(f"[Scheduler] inside for req {req_id} has returned None ") if DEBUG_SCHEDULER else None
+            return None
+        
+    if not page_table[req_id]["full_transfer_scheduled"]:
+        
+        print(f"[Scheduler] inside for req {req_id} has started full transfer") if DEBUG_SCHEDULER else None
         prefill_rate = page_table[req_id]["prefill_arrival_rate_ms"]
         transfer_rate = page_table[req_id]["transfer_rate_ms"]
 
-        if layers_on_cpu < WARMUP_THRESHOLD:
-            print(f"[Scheduler] has not warm-up transfer for req {req_id}") if DEBUG_SCHEDULER else None
-            time.sleep(0.001)
-            continue
-
         if transfer_rate is None:
-            # Ask Runtime to start transfer_for_first_few_layers
-            print(f"[Scheduler] warm-up transfer rate for req {req_id} is not present yet") if DEBUG_SCHEDULER else None
-            return True    # Start warm-up transfer
-        
-        remaining_prefill = (total_layers - layers_on_cpu) * prefill_rate
+            return None   # wait for warmup to finish
 
-        # Full transfer time estimate
-        full_transfer_time = total_layers * transfer_rate
-
-        # Ideal delay
-        delay = remaining_prefill - full_transfer_time
+        # Dynamic time alignment (your previous logic)
+        remaining = (total_layers - layers_on_cpu) * prefill_rate
+        full_time = total_layers * transfer_rate
+        delay = remaining - full_time
 
         if delay > 0:
-            print(f"[Scheduler] Delay transfer by {delay:.2f} ms for req {req_id}") if DEBUG_SCHEDULER else None
-            time.sleep(delay / 1000)
+            print(f"[Scheduler] Delay full-transfer by {delay:.2f} ms for req {req_id}") if DEBUG_SCHEDULER else None
+            time.sleep(delay/1000)
 
-        print(f"[Scheduler] Dynamic-mode transfer start for req {req_id}")  if DEBUG_SCHEDULER else None
-        return True
+        print(f"[Scheduler] Full transfer start for req {req_id}") if DEBUG_SCHEDULER else None
+        return "full"
 
+    return None
 
             
     

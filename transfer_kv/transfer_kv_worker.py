@@ -3,7 +3,7 @@ import datetime
 from transformers.cache_utils import DynamicCache
 import time
 
-TRANSFER_DEBUG = False
+TRANSFER_DEBUG = True
 
 decode_device = "cuda:0"
 prefill_device = "cuda:1"
@@ -26,7 +26,7 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
 
     past_key_values = DynamicCache()
 
-    for layer_id in range(start_layers,end_layers+1):
+    for layer_id in range(start_layers,end_layers):
 
         start_t = time.time()
 
@@ -37,7 +37,7 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
         page_table.update_layers_at_transfer(req_id,layers_ms)
 
         if layer_id == 0 and TRANSFER_DEBUG :  
-            print(f"[Decode] Layer {layer_id} copy: slice={k_tensor.flatten()[:10]}")
+            print(f"[Transfer] Layer {layer_id} copy: slice={k_tensor.flatten()[:10]}")
 
         past_key_values.update(k_tensor,v_tensor,layer_id,cache_kwargs=None)
     

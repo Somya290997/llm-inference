@@ -1,5 +1,5 @@
 from runtime_engine.runtime import Runtime
-
+import time
 runtime = Runtime()
 
 req_id1 = 1
@@ -16,3 +16,6 @@ Finally, understanding prompt length matters when fine-tuning as well. During tr
 Overall, a 1024-token prompt is long enough to include multiple instructions, several examples, and extensive user context, but short enough to be processed efficiently by most mid-sized LLMs. Understanding its structure and impact is an essential part of building scalable, low-latency AI systems.'''
 
 runtime.submit_request(req_id=req_id1,prompt=prompt1)
+
+while True:
+    time.sleep(1)

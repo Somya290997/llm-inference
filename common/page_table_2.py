@@ -27,8 +27,10 @@ class PageTable:
             "seq_len" : seq_len,
             "shape": shape,
             "dtype": dtype,
-            "layers_at_cpu": 0,
-            "cpu_layer_timestamp": [],  # prefill to CPU
+            "warmup_done": False,
+            "full_transfer_scheduled": False,
+            "layers_at_cpu": -1,
+            "cpu_layer_timestamps": [],  # prefill to CPU
             "prefill_arrival_rate_ms": None,  # avg ms per layer
             "transfer_layer_timestamps": [],  # CPU → GPU (decode) transfer times
             "transfer_rate_ms": None,         # avg ms per layer
@@ -41,7 +43,7 @@ class PageTable:
 
     def update_layers_at_cpu(self, req_id):
         self.table[req_id]["layers_at_cpu"] += 1
-        self.table[req_id]["cpu_layer_timestamp"].append(time.time())
+        self.table[req_id]["cpu_layer_timestamps"].append(time.time())
         self.update_prefill_rate(req_id)
         
 
@@ -67,7 +69,7 @@ class PageTable:
 
     
     def update_transfer_rate(self, req_id):
-        times = self.table[req_id]["transfer_layer_times_ms"]
+        times = self.table[req_id]["transfer_layer_timestamps"]
         if len(times) < 2:
             return
 
@@ -107,6 +109,9 @@ class PageTable:
 
 
     def get_kv_gpu(self, req_id, layer,shape, device,cpu_kv_manager):
+
+        while layer not in self.table[req_id]["layers"]:
+            time.sleep(0.0005)
 
         k_block_ids = self.table[req_id]["layers"][layer]["K"]
         v_block_ids = self.table[req_id]["layers"][layer]["V"]

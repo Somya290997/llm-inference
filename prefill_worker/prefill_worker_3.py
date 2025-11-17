@@ -4,7 +4,7 @@ from transformers.cache_utils import DynamicCache
 from datetime import datetime
 import yaml
 
-DEBUG_PREFILL = False
+DEBUG_PREFILL = True
 
 # Loading the Yaml files
 with open("config/model_config.yaml", "r") as f:
@@ -39,7 +39,7 @@ def _load_model_once():
     
     return _model, _tokenizer
 
-def prefill_stage(req_id,prompt,page_table,cpu_kv_manager):
+def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
 
     torch.cuda.set_device(1)
     print(f"[Prefill] for req {req_id} has been started ") if DEBUG_PREFILL else None
@@ -50,10 +50,11 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager):
 
     model , tokenizer = _load_model_once()
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(prefill_device)
-    seq_len = inputs["input_ids"].shape[1]
+    inputs1 = tokenizer(prompt, return_tensors="pt")
+    seq_len = inputs1["input_ids"].shape[1]
 
-    page_table[req_id]["input_ids"] = inputs["input_ids"]
+  
+    inputs = tokenizer(prompt, return_tensors="pt").to(prefill_device)
 
     print(f"Number of tokens in {req_id} is {seq_len} ") if DEBUG_PREFILL else None
 
@@ -64,6 +65,8 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager):
     print(f"[Prefill] for req {req_id} has started the Page_table_intialization ") if DEBUG_PREFILL else None
     page_table.init_request(req_id = req_id, num_layers=model.config.num_hidden_layers, seq_len=seq_len, shape = kv_shape, dtype=torch.float16)
     print(f"[Prefill] for req {req_id} has complete the Page_table_intialization  ") if DEBUG_PREFILL else None
+
+    page_table[req_id]["input_ids"] = inputs1["input_ids"]
     
     prefill_start = datetime.now()
     print(f"[{prefill_start.strftime('%H:%M:%S.%f')[:-3]}] Prefill START {req_id}") if DEBUG_PREFILL else None
@@ -83,7 +86,11 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager):
 
             page_table.update_layers_at_cpu(req_id)
             print(f"[Prefill] for req {req_id} has sucessfully incremented the layer {page_table.get_layer_at_cpu(req_id)}") if DEBUG_PREFILL and layer_idx == 0 else None 
-
+            
+            if not page_table[req_id]["warmup_done"] and page_table.get_layer_at_cpu(req_id) < 5:
+                print(f'''{layer_idx} the {req_id} is put inside schedular queue {page_table.get_layer_at_cpu(req_id)} and {page_table[req_id]["warmup_done"]} ''')
+                schedular_queue.put(req_id)
+                
             if layer_idx == 0:
                 print(f"[Prefill] Layer {layer_idx} CPU KV written. slice={k_clone.flatten()[:10]}") if DEBUG_PREFILL else None
 

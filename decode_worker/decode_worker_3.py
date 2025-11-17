@@ -2,7 +2,7 @@ import time
 import torch
 from datetime import datetime
 
-DEBUG_DECODE = False
+DEBUG_DECODE = True
 
 _model = None
 _tokenizer = None
@@ -31,6 +31,8 @@ def decode_stage(req_id, past_key_values ,page_table, cpu_kv_manager):
 
     input_ids = page_table[req_id]["input_ids"].to(decode_device)
 
+    last_token = input_ids[:,-1:]
+
     generated_tokens = []
     max_output_len = 64
 
@@ -40,7 +42,7 @@ def decode_stage(req_id, past_key_values ,page_table, cpu_kv_manager):
     with torch.no_grad():
 
         outputs = model(
-            input_ids = input_ids,
+            input_ids = last_token,
             past_key_values=past_key_values,
             use_cache = True
         )

@@ -33,9 +33,8 @@ class Runtime:
 
     # To submit the request
     def submit_request(self,req_id , prompt):
-        while True:
-            self.user_input_queue.put((req_id,prompt))
-
+        print(f"I am at {req_id}")
+        self.user_input_queue.put((req_id,prompt))
 
     # Workers
         
@@ -50,46 +49,48 @@ class Runtime:
     def prefill_worker(self):
         while True:
             req_id , prompt = self.prefill_queue.get()
-            self.schedular_queue.put(req_id)
-            prefill_stage(req_id=req_id,prompt=prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager)
+            prefill_stage(req_id=req_id,prompt=prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager,schedular_queue=self.schedular_queue)
 
 
     # scheduler_worker
     def scheduler_worker(self):
-        req_id = self.schedular_queue.get()
-        device = device # to much
-
         while True:
-            if scheduler_stage(req_id, device, self.page_table, self.cpu_kv_manager):
-                self.transfer_queue.put(req_id)
+            req_id = self.schedular_queue.get()
+            device = "cuda:1" # to much
+            action = scheduler_stage(req_id, device, self.page_table, self.cpu_kv_manager)
+            if action == "warmup":
+                self.transfer_queue.put(("warmup", req_id))
+            elif action == "full":
+                self.transfer_queue.put(("full", req_id))
 
 
             
     # transfer_worker
     def transfer_worker(self):
         while True:
-            req_id = self.transfer_queue.get()
+            mode, req_id = self.transfer_queue.get()
             warm_up_layers = 3
             total_layers = self.page_table[req_id]["num_layers"]
-
-            if self.page_table[req_id]["transfer_rate_ms"] is None:
-                print(f"[Transfer] Warm-up transfer for req {req_id}")
-                transfer_stage(req_id, 0, warm_up_layers - 1, 
-                            self.page_table, self.cpu_kv_manager)
-                # After this, transfer_rate_ms now exists
-                # Tell scheduler to run again
+    
+            if mode == "warmup":
+                print(f"[Transfer] Warm-up for req {req_id} has started")
+                transfer_stage(req_id, 0, warm_up_layers,
+                               self.page_table, self.cpu_kv_manager)
+                self.page_table[req_id]["warmup_done"] = True
+                print(f"[Transfer] Warm-up for req {req_id} has been done")
+                # DO NOT push back to scheduler
+                # prefill will eventually push again when layers accumulate
                 self.schedular_queue.put(req_id)
                 continue
-
-            print(f"[Transfer] Dynamic full transfer for req {req_id}")
-            KV_cache = transfer_stage(req_id, warm_up_layers, total_layers - 1,
-                        self.page_table, self.cpu_kv_manager)
-
-            # Mark finished
-            self.page_table[req_id]["ready_for_decode"] = True
-
-            # Send req_id to decode worker
-            self.decode_queue.put((req_id,KV_cache))
+    
+            if mode == "full":
+                print(f"[Transfer] Dynamic full transfer for req {req_id}")
+                self.page_table[req_id]["full_transfer_scheduled"] = True
+                KV_cache = transfer_stage(req_id, 0, total_layers - 1,
+                                          self.page_table, self.cpu_kv_manager)
+    
+                self.page_table[req_id]["ready_for_decode"] = True
+                self.decode_queue.put((req_id, KV_cache))
     
     # decode worker
     def decode_worker(self):
