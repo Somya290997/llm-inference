@@ -4,7 +4,7 @@ import math
 from transfer_kv.transfer_kv_worker import transfer_stage
 from transformers.cache_utils import DynamicCache
 
-DEBUG_SCHEDULER = True
+DEBUG_SCHEDULER = False
 
 def scheduler_stage(req_id, device, page_table, cpu_kv_manager):
 
@@ -37,7 +37,7 @@ def scheduler_stage(req_id, device, page_table, cpu_kv_manager):
         delay = remaining - full_time
 
         if delay > 0:
-            print(f"[Scheduler] Delay full-transfer by {delay:.2f} ms for req {req_id}") if DEBUG_SCHEDULER else None
+            print(f"[Scheduler] Delay full-transfer by {delay:.2f} ms for req {req_id}")
             time.sleep(delay/1000)
 
         print(f"[Scheduler] Full transfer start for req {req_id}") if DEBUG_SCHEDULER else None

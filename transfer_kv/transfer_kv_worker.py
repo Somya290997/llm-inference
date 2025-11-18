@@ -4,7 +4,7 @@ from transformers.cache_utils import DynamicCache
 import time
 import torch
 
-TRANSFER_DEBUG = True
+TRANSFER_DEBUG = False
 
 decode_device = "cuda:0"
 prefill_device = "cuda:1"
@@ -53,11 +53,16 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
         layers_ms = (end_t - start_t)*1000
         page_table.update_layers_at_transfer(req_id,layers_ms)
 
-        if layer_id == 0 and TRANSFER_DEBUG :  
-            print(f"[Transfer] Layer {layer_id} copy: slice={k_tensor.flatten()[:10]}")
+        if TRANSFER_DEBUG :  
+            print(f"[Transfer] Layer {layer_id} for {req_id} copy: slice={k_tensor.flatten()[:10]}")
 
         past_key_values.update(k_tensor,v_tensor,layer_id,cache_kwargs=None)
+
+    # logits
+    logits = None
+    if end_layers == 32:
+        shape_logits = (batch_size,32000)
+        logits = page_table.get_logits_kv_gpu(req_id=req_id, device=decode_device , shape=shape_logits , cpu_kv_manager=cpu_kv_manager)
+        print(f"[Transfer] stage for req {req_id} has been completed") 
     
-    print(f"[Transfer] stage for req {req_id} has been completed") if TRANSFER_DEBUG else None 
-    
-    return past_key_values
+    return past_key_values , logits

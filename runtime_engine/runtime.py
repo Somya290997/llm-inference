@@ -61,6 +61,7 @@ class Runtime:
             device = "cuda:1" # to much
             action = scheduler_stage(req_id, device, self.page_table, self.cpu_kv_manager)
             if action == "warmup":
+                self.page_table[req_id]["warmup_done"] = True
                 self.transfer_queue.put(("warmup", req_id))
             elif action == "full":
                 self.transfer_queue.put(("full", req_id))
@@ -73,13 +74,14 @@ class Runtime:
             mode, req_id = self.transfer_queue.get()
             warm_up_layers = 3
             total_layers = self.page_table[req_id]["num_layers"]
-    
+            
             if mode == "warmup":
-                print(f"[Transfer] Warm-up for req {req_id} has started")
+                # print(f"[Transfer] Warm-up for req {req_id} has started")
                 transfer_stage(req_id, 0, warm_up_layers,
                                self.page_table, self.cpu_kv_manager)
-                self.page_table[req_id]["warmup_done"] = True
-                print(f"[Transfer] Warm-up for req {req_id} has been done")
+                # self.page_table[req_id]["warmup_done"] = True
+                # print(f"[Transfer] Warm-up for req {req_id} has been done")
+                # self.table[req_id]["layers_transfered"] = 0
                 # DO NOT push back to scheduler
                 # prefill will eventually push again when layers accumulate
                 self.schedular_queue.put(req_id)
@@ -88,17 +90,17 @@ class Runtime:
             if mode == "full":
                 print(f"[Transfer] Dynamic full transfer for req {req_id}")
                 self.page_table[req_id]["full_transfer_scheduled"] = True
-                KV_cache = transfer_stage(req_id, 0, total_layers,
+                KV_cache , logits = transfer_stage(req_id, 0, total_layers,
                                           self.page_table, self.cpu_kv_manager)
     
                 self.page_table[req_id]["ready_for_decode"] = True
-                self.decode_queue.put((req_id, KV_cache))
+                self.decode_queue.put((req_id, KV_cache ,logits ))
     
     # decode worker
     def decode_worker(self):
         while True:
-            req_id  , KV_cache = self.decode_queue.get()
-            decode_stage(req_id,KV_cache,self.page_table,self.cpu_kv_manager)
+            req_id  , KV_cache , logits = self.decode_queue.get()
+            decode_stage(req_id,KV_cache,logits,self.page_table,self.cpu_kv_manager)
 
 
     

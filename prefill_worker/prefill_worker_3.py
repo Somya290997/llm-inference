@@ -4,7 +4,7 @@ from transformers.cache_utils import DynamicCache
 from datetime import datetime
 import yaml
 
-DEBUG_PREFILL = True
+DEBUG_PREFILL = False
 
 # Loading the Yaml files
 with open("config/model_config.yaml", "r") as f:
@@ -42,7 +42,7 @@ def _load_model_once():
 def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
 
     torch.cuda.set_device(1)
-    print(f"[Prefill] for req {req_id} has been started ") if DEBUG_PREFILL else None
+    print(f"[Prefill] for req {req_id} has been started ")
 
     enable_p2p()
 
@@ -57,7 +57,7 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
     seq_len = inputs["input_ids"].shape[1]
     
 
-    print(f"Number of tokens in {req_id} is {seq_len} ") if DEBUG_PREFILL else None
+    print(f"Number of tokens in {req_id} is {seq_len} ")
 
     hidden_dim = model.config.hidden_size // model.config.num_attention_heads
     batch_size = 1
@@ -101,8 +101,8 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
                 print(f'''{layer_idx} the {req_id} is put inside schedular queue {page_table.get_layer_at_cpu(req_id)} and {page_table[req_id]["warmup_done"]} ''')
                 schedular_queue.put(req_id)
                 
-            if layer_idx == 0:
-                print(f"[Prefill] Layer {layer_idx} CPU KV written. slice={k_clone.flatten()[:10]}") if DEBUG_PREFILL else None
+            # if layer_idx == 0:
+            print(f"[Prefill] Layer {layer_idx} for {req_id} is CPU KV written. slice={k_clone.flatten()[:10]}") if DEBUG_PREFILL else None
 
             print(f"[Prefill] for req {req_id} has streamed layer: {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None
 
@@ -116,17 +116,16 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
     # Forward pass
     with torch.no_grad():
         outputs = model(**inputs_gpu, past_key_values=cache, use_cache=True)
-    # print(f"[prefill] for req {req_id}  {len(page_table[req_id]["layers"])} ")
+
+    
     print(f"[Prefill] for req {req_id} has completed forward pass") if DEBUG_PREFILL else None
 
-    logits_cpu = outputs.logits[:, -1, :].detach().to("cpu")
-    print(f"Shape of the logits {logits_cpu.shape}")
-    page_table[req_id]["last_layer_logits"] = logits_cpu
-    
 
-    # print(f"[Prefill] for req {req_id} has started for set_logits_kv_cpu") if DEBUG_PREFILL else None 
-    # page_table.set_logits_kv_cpu(req_id,logits_cpu,cpu_kv_manager)
-    # print(f"[Prefill] for req {req_id} has started for set_logits_kv_cpu") if DEBUG_PREFILL else None 
+    print(f"[Prefill] for req {req_id} has started for set_logits_kv_cpu") if DEBUG_PREFILL else None 
+    logits_cpu = outputs.logits[:, -1, :].clone().detach().cpu().contiguous()
+    print(f"Shape of the logits {logits_cpu.shape}") if DEBUG_PREFILL else None 
+    page_table.set_logits_kv_cpu(req_id,logits_cpu,cpu_kv_manager)
+    print(f"[Prefill] for req {req_id} has started for set_logits_kv_cpu") if DEBUG_PREFILL else None 
     
     # page_table.table[req_id]["decode_can_start"] = True
 
@@ -138,6 +137,6 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
     print(
         f"[{prefill_end.strftime('%H:%M:%S.%f')[:-3]}] Prefill END {req_id} "
         f"(took {elapsed_ms:.2f} ms)"
-    ) if DEBUG_PREFILL else None
+    )
 
     

@@ -24,6 +24,7 @@ class PageTable:
             "layers" : {},
             "input_ids" : None,
             "last_layer_logits" : None,
+            "warmup_scheduled": False,
             "num_layers": num_layers,
             "seq_len" : seq_len,
             "shape": shape,
@@ -106,13 +107,13 @@ class PageTable:
     def set_logits_kv_cpu(self,req_id,logits,cpu_kv_manager):
 
         logits_block_ids = cpu_kv_manager.write_logits(logits)
-        self.table[req_id]["logits"] = logits_block_ids
+        self.table[req_id]["last_layer_logits"] = logits_block_ids
 
 
     def get_kv_gpu(self, req_id, layer,shape, device,cpu_kv_manager):
 
         while layer not in self.table[req_id]["layers"]:
-            time.sleep(0.0005)
+            time.sleep(0.0002)
 
         k_block_ids = self.table[req_id]["layers"][layer]["K"]
         v_block_ids = self.table[req_id]["layers"][layer]["V"]
@@ -122,16 +123,11 @@ class PageTable:
     
     def get_logits_kv_gpu(self,req_id,device,shape,cpu_kv_manager):
 
-        logits_block_ids = self.table[req_id]["logits"]
+        while self.table[req_id]["last_layer_logits"] is None:
+            time.sleep(0.0002)
+
+        logits_block_ids = self.table[req_id]["last_layer_logits"]
         logits = cpu_kv_manager.read_logits(logits_block_ids,shape,device)
         return logits
         
 
-    # def free_req(self,req_id,cpu_kv_manager):
-
-    #     for layer_id in range(self.table[req_id]["num_layers"]):
-    #         k_block_ids = self.table[req_id][layer_id]["K"]
-    #         v_block_ids = self.table[req_id][layer_id]["V"]
-    #         cpu_kv_manager.free_layer(k_block_ids,v_block_ids)
-
-    #     del self.table[req_id]
