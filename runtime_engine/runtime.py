@@ -8,6 +8,7 @@ from prefill_worker.prefill_worker_3 import prefill_stage
 from scheduler.scheduler import scheduler_stage
 from transfer_kv.transfer_kv_worker import transfer_stage
 from decode_worker.decode_worker_3 import decode_stage
+from transfer_kv.transfer_kv_cpu_worker import transfer_kv_cpu_worker
 
 class Runtime:
 
@@ -19,6 +20,7 @@ class Runtime:
         self.schedular_queue = queue.Queue()
         self.transfer_queue = queue.Queue()
         self.decode_queue = queue.Queue()
+        self.kv_write_to_cpu_queue = queue.Queue()
 
         self.cache = None
 
@@ -29,6 +31,7 @@ class Runtime:
         # Threads
         threading.Thread(target=self.user_input_worker, args=() , daemon=True).start()
         threading.Thread(target=self.prefill_worker, args=() , daemon=True).start()
+        threading.Thread(target=self.KV_write_CPU_worker, args=() , daemon=True).start()
         threading.Thread(target=self.scheduler_worker, args=() , daemon=True).start()
         threading.Thread(target=self.transfer_worker, args=() , daemon=True).start()
         threading.Thread(target=self.decode_worker, args=() , daemon=True).start()
@@ -51,7 +54,12 @@ class Runtime:
     def prefill_worker(self):
         while True:
             req_id , prompt = self.prefill_queue.get()
-            self.cache = prefill_stage(req_id=req_id,prompt=prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager,schedular_queue=self.schedular_queue)
+            self.cache = prefill_stage(req_id=req_id,prompt=prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager,schedular_queue=self.schedular_queue , kv_write_to_cpu_queue=self.kv_write_to_cpu_queue)
+
+    def KV_write_CPU_worker(self):
+        while True:
+            request_for_transfer = self.kv_write_to_cpu_queue.get()
+            transfer_kv_cpu_worker(request_for_transfer,self.page_table,self.cpu_kv_manager)
 
 
     # scheduler_worker
@@ -77,6 +85,7 @@ class Runtime:
             
             if mode == "warmup":
                 # print(f"[Transfer] Warm-up for req {req_id} has started")
+                self.page_table[req_id]["warmup_scheduled"] = True
                 transfer_stage(req_id, 0, warm_up_layers,
                                self.page_table, self.cpu_kv_manager)
                 # self.page_table[req_id]["warmup_done"] = True

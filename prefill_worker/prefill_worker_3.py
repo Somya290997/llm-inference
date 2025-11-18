@@ -39,7 +39,7 @@ def _load_model_once():
     
     return _model, _tokenizer
 
-def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
+def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_write_to_cpu_queue):
 
     torch.cuda.set_device(1)
     print(f"[Prefill] for req {req_id} has been started ")
@@ -91,13 +91,16 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue):
             print(f"[Prefill] for req {req_id} shape {key_states.shape}") if DEBUG_PREFILL and layer_idx == 0 else None 
 
             print(f"[Prefill] for req {req_id} has started for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
-            page_table.set_kv_cpu(req_id = req_id , layer = layer_idx, k_tensor = k_clone , v_tensor = v_clone, cpu_kv_manager = cpu_kv_manager)
+            # page_table.set_kv_cpu(req_id = req_id , layer = layer_idx, k_tensor = k_clone , v_tensor = v_clone, cpu_kv_manager = cpu_kv_manager)
+
+            kv_write_to_cpu_queue.put((req_id,layer_idx,k_clone,v_clone))
+
             print(f"[Prefill] for req {req_id} has complete for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
 
-            page_table.update_layers_at_cpu(req_id)
+            # page_table.update_layers_at_cpu(req_id)
             print(f"[Prefill] for req {req_id} has sucessfully incremented the layer {page_table.get_layer_at_cpu(req_id)}") if DEBUG_PREFILL and layer_idx == 0 else None 
             
-            if not page_table[req_id]["warmup_done"] and page_table.get_layer_at_cpu(req_id) < 5:
+            if not page_table[req_id]["warmup_done"] and page_table.get_layer_at_cpu(req_id) < 5 and not page_table[req_id]["warmup_scheduled"]:
                 print(f'''{layer_idx} the {req_id} is put inside schedular queue {page_table.get_layer_at_cpu(req_id)} and {page_table[req_id]["warmup_done"]} ''')
                 schedular_queue.put(req_id)
                 
