@@ -2,6 +2,7 @@ import torch
 import cupy as cp
 from transformers.cache_utils import DynamicCache
 from datetime import datetime
+import time
 import yaml
 
 DEBUG_PREFILL = False
@@ -66,6 +67,7 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
 
 
     prefill_start = datetime.now()
+    prefill_start1 = time.time()
     print(f"[{prefill_start.strftime('%H:%M:%S.%f')[:-3]}] Prefill START {req_id}") if DEBUG_PREFILL else None
 
 
@@ -95,6 +97,7 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
             # copy_stream.record_event(event)
             kv_write_to_cpu_queue.put((req_id,layer_idx,k_clone,
                 v_clone , start_time))
+            
 
             print(f"[Prefill] for req {req_id} has complete for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
 
@@ -111,7 +114,7 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
             print(f"[Prefill] for req {req_id} has streamed layer: {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None
             end = datetime.now()
             elapsed_ms1 = (end - t1).total_seconds() * 1000
-            print(f"{elapsed_ms1:.2f} msis the time")
+            print(f"{elapsed_ms1:.2f} ms is the time for time layer")
             return super().update(key_states, value_states, layer_idx, cache_kwargs)
 
     
@@ -142,7 +145,7 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
     torch.cuda.synchronize(prefill_device)
 
     prefill_end = datetime.now()
-    page_table[req_id]["prefill_end_time"] = prefill_end
+    page_table[req_id]["prefill_end_time"] = time.time()
     
     elapsed_ms = (prefill_end - prefill_start).total_seconds() * 1000
 
@@ -150,6 +153,10 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
         f"[{prefill_end.strftime('%H:%M:%S.%f')[:-3]}] Prefill END {req_id} "
         f"(took {elapsed_ms:.2f} ms)"
     )
+
+    overlap_time = max(0,(time.time() - page_table[req_id]["CPU_transfer"]) * 1000 )
+    overlap_percentage = (overlap_time / (elapsed_ms) ) * 100
+    print(f'''[Transfer] stage for req {req_id} has been completed with an overlap time of {overlap_time:2f} ms and overlap percentage {overlap_percentage:2f} %''') 
 
     
 

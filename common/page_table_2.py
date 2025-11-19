@@ -40,7 +40,8 @@ class PageTable:
             "layers_transfered" : 0,
             "ready_for_decode": False,        # decode can begin
             "kv_gpu_bytes": 0,
-            "prefill_end_time": 0           # estimated KV memory size for scheduling
+            "prefill_end_time": 0.0, 
+            "CPU_transfer": 0.0 # estimated KV memory size for scheduling
         }
 
 

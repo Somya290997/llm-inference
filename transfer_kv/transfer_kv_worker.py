@@ -1,5 +1,5 @@
 import yaml
-import datetime
+from datetime import datetime
 from transformers.cache_utils import DynamicCache
 import time
 import torch
@@ -26,10 +26,10 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
     shape = (batch_size, n_heads, seq_len, hidden_dim) 
 
     past_key_values = DynamicCache()
-    start_t = 0
+    start_t1 = 0
 
-    if end_layers == 32 and page_table[req_id]["prefill_end_time"] is not 0:
-        start_t = datetime.now()
+    if end_layers == 32 and page_table[req_id]["prefill_end_time"] != 0:
+        start_t1 = time.time()
 
     for layer_id in range(start_layers,end_layers):
 
@@ -69,8 +69,8 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
     if end_layers == 32:
         shape_logits = (batch_size,32000)
         logits = page_table.get_logits_kv_gpu(req_id=req_id, device=decode_device , shape=shape_logits , cpu_kv_manager=cpu_kv_manager)
-        overlap_time = max(0,(page_table[req_id]["prefill_end_time"] - start_t))
-        overlap_percentage = (overlap_time / (datetime.now()-start_t) ) * 100
-        print(f"[Transfer] stage for req {req_id} has been completed with an overlap time of {overlap_time:2f} ms and overlap percentage {overlap_percentage:2f} %") 
+        overlap_time = max(0,(page_table[req_id]["prefill_end_time"] - start_t1) * 1000 )
+        overlap_percentage = (overlap_time / (time.time() - start_t1) ) * 100
+        print(f'''[Transfer] stage for req {req_id} has been completed with an overlap time of {overlap_time:2f} ms and overlap percentage {overlap_percentage:2f} % and prefill_end_time=  {page_table[req_id]["prefill_end_time"]} and transfer start {start_t1}''') 
     
     return past_key_values , logits

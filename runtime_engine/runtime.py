@@ -63,7 +63,7 @@ class Runtime:
     def KV_write_CPU_worker(self):
         while True:
             request_for_transfer = self.kv_write_to_cpu_queue.get()
-            transfer_kv_cpu_worker(request_for_transfer,self.page_table,self.cpu_kv_manager,self.schedular_queue)
+            transfer_kv_cpu_worker(request_for_transfer,self.page_table,self.cpu_kv_manager,self.schedular_queue,self.transfer_queue)
 
 
     # scheduler_worker
@@ -112,6 +112,7 @@ class Runtime:
     def decode_worker(self):
         while True:
             req_id  , KV_cache , logits , start_time = self.decode_queue.get()
+            print( f''' prefill_arrival_rate_ms = inside decode { self.page_table[req_id]["prefill_arrival_rate_ms"] }  and  transfer_rate_ms = {self.page_table[req_id]["transfer_rate_ms"]} is ''')
             decode_stage(req_id,KV_cache,logits,self.page_table,self.cpu_kv_manager , start_time)
             
 

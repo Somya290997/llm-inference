@@ -32,14 +32,14 @@ def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager ,sta
     eos = tokenizer.eos_token_id
     generated_ids = []
     max_new_tokens = 128
-    repetition_penalty = 1.1
+    # repetition_penalty = 1.1
 
     decode_start = datetime.now()
     print(f"[{decode_start.strftime('%H:%M:%S.%f')[:-3]}] Decode START {req_id}")
 
     # next_token = torch.argmax(last_logits, dim=-1, keepdim=True)
 
-    temperature = 0.7
+    temperature = 0.8
     top_p = 0.9
     
     # Apply temperature
@@ -47,19 +47,19 @@ def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager ,sta
     # Softmax to get probabilities
     probs = torch.softmax(logits, dim=-1)
     
-    # # Top-p (nucleus) sampling
-    # sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
-    # cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+    # Top-p (nucleus) sampling
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
     
-    # # Remove tokens with cumulative probability above the threshold
-    # sorted_indices_to_remove = cumulative_probs > top_p
-    # sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-    # sorted_indices_to_remove[..., 0] = 0
+    # Remove tokens with cumulative probability above the threshold
+    sorted_indices_to_remove = cumulative_probs > top_p
+    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+    sorted_indices_to_remove[..., 0] = 0
     
-    # # Zero out low-probability tokens
-    # indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-    # probs[indices_to_remove] = 0.0
-    # probs = probs / probs.sum(dim=-1, keepdim=True)
+    # Zero out low-probability tokens
+    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+    probs[indices_to_remove] = 0.0
+    probs = probs / probs.sum(dim=-1, keepdim=True)
     
     # Sample
     next_token = torch.multinomial(probs, num_samples=1)
@@ -72,11 +72,6 @@ def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager ,sta
     print(f"[Decode] Time to first token for {req_id}: {ttfb_ms:.2f} ms and time to start token generation is {req_time:.2f} ms")
     print(f"[Decode] First token = {token_id}") if DEBUG_DECODE else None 
 
-    # # EOS check
-    # if token_id == eos:
-    #     print("EOS from prefill — stopping.")
-    #     print(tokenizer.decode(generated_ids, skip_special_tokens=True))
-    #     return
 
     # we start decode with updated KV from prefill
     past_kv = past_key_values
@@ -101,10 +96,6 @@ def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager ,sta
         logits = outputs.logits[:, -1, :]
 
         # choose next token
-
-        for token_id in set(generated_ids):
-            logits[0,token_id]/= repetition_penalty
-
         logits = logits / temperature
     
         # Softmax to get probabilities

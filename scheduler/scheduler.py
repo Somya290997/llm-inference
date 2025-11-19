@@ -31,8 +31,10 @@ def scheduler_stage(req_id, device, page_table, cpu_kv_manager):
             return None   # wait for warmup to finish
 
         # Dynamic time alignment (your previous logic)
+        
         remaining = (total_layers - layers_on_cpu) * prefill_rate
         full_time = total_layers * transfer_rate
+        print(f"Inside schdedular , {remaining} and {full_time} ")
         delay = remaining - full_time 
 
         if delay > 0:
