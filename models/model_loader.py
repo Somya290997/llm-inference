@@ -6,6 +6,9 @@ import torch
 import os
 import yaml
 
+torch.backends.cuda.enable_flash_sdp(True)      # FlashAttention kernel
+torch.backends.cuda.enable_math_sdp(False)      # Disable fallback
+torch.backends.cuda.enable_mem_efficient_sdp(False)
 
 # Loading the Yaml files
 with open("config/model_config.yaml", "r") as f:
@@ -29,13 +32,22 @@ def get_model(device_id):
         )
 
 
-        _model_cache[device_id] = AutoModelForCausalLM.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             MODEL_PATH,
             # quantization_config=bnb_config,
             device_map={"": device_id},
             torch_dtype=torch.float16,
             local_files_only=True
         ).eval()
+
+        _model_cache[device_id] = model
+
+        # 💥 Enable FlashAttention (only if supported)
+        if hasattr(model.config, "_attn_implementation"):
+            model.config._attn_implementation = "flash_attention_2"
+            print("FlashAttention is supported by this model")
+        else:
+            print("[WARN] FlashAttention not supported by this model")
         
     return _model_cache[device_id]
 

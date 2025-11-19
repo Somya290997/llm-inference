@@ -24,7 +24,7 @@ def _load_model_once():
 
 
 
-def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager):
+def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager ,start_time):
 
     torch.cuda.set_device(0)
     model, tokenizer = _load_model_once()
@@ -39,7 +39,7 @@ def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager):
     last_logits = logits
     # next_token = torch.argmax(last_logits, dim=-1, keepdim=True)
 
-    temperature = 0.2
+    temperature = 0.7
     top_p = 0.9
     
     # Apply temperature
@@ -70,7 +70,8 @@ def decode_stage(req_id, past_key_values,logits, page_table, cpu_kv_manager):
 
     ttfb_end = datetime.now()
     ttfb_ms = (ttfb_end - decode_start).total_seconds() * 1000
-    print(f"[Decode] TTFB for {req_id}: {ttfb_ms:.2f} ms")
+    req_time =  (ttfb_end - start_time).total_seconds() * 1000
+    print(f"[Decode] Time to first token for {req_id}: {ttfb_ms:.2f} ms and time to start token generation is {req_time:.2f} ms")
 
     print(f"[Decode] First token = {token_id}") if DEBUG_DECODE else None 
 
