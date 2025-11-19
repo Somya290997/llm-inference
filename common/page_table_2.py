@@ -24,25 +24,39 @@ class PageTable:
             "layers" : {},
             "input_ids" : None,
             "last_layer_logits" : None,
-            "warmup_scheduled": False,
             "num_layers": num_layers,
             "seq_len" : seq_len,
             "shape": shape,
             "dtype": dtype,
-            "warmup_done": False,
             "full_transfer_scheduled": False,
             "layers_at_cpu": -1,
+            
             "cpu_layer_timestamps": [],  # prefill to CPU
             "prefill_arrival_rate_ms": None,  # avg ms per layer
+            
             "transfer_layer_timestamps": [],  # CPU → GPU (decode) transfer times
             "transfer_rate_ms": None,         # avg ms per layer
+            
             "transfer_in_progress": False,    # avoid double scheduling
+            
             "layers_transfered" : 0,
+            
             "ready_for_decode": False,        # decode can begin
+            
             "kv_gpu_bytes": 0,
+            
+            "req_id_start_time": 0.0,
+            "req_id_end_time": 0.0,
+            "prefill_start_time": 0.0, 
             "prefill_end_time": 0.0, 
-            "CPU_transfer": 0.0 # estimated KV memory size for scheduling
+            "CPU_transfer_start_time": 0.0,
+            "CPU_transfer_end_time": 0.0,
+            "GPU0_transfer_start_time": 0.0,
+            "GPU0_transfer_end_time": 0.0,
+            "Decode_start_time" : 0.0,
+            "Decode_end_time": 0.0
         }
+
 
 
     def update_layers_at_cpu(self, req_id):
@@ -51,7 +65,6 @@ class PageTable:
         self.update_prefill_rate(req_id)
         
 
-    
     def update_prefill_rate(self, req_id):
         ts = self.table[req_id]["cpu_layer_timestamps"]
         if len(ts) < 2:

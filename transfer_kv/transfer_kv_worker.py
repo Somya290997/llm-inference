@@ -5,11 +5,12 @@ import time
 import torch
 
 TRANSFER_DEBUG = False
+no_of_layers = 32
 
 decode_device = "cuda:0"
 prefill_device = "cuda:1"
 
-def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manager):
+def transfer_stage(req_id, page_table , cpu_kv_manager):
     
     print(f"[Transfer] stage for req {req_id} has been started") if TRANSFER_DEBUG else None 
 
@@ -26,12 +27,11 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
     shape = (batch_size, n_heads, seq_len, hidden_dim) 
 
     past_key_values = DynamicCache()
-    start_t1 = 0
+    
+    if page_table[req_id]["GPU0_transfer_start_time"] == 0:
+        page_table[req_id]["GPU0_transfer_start_time"] = time.time()
 
-    if end_layers == 32 and page_table[req_id]["prefill_end_time"] != 0:
-        start_t1 = time.time()
-
-    for layer_id in range(start_layers,end_layers):
+    for layer_id in range(0,no_of_layers):
 
         start_t = time.time()
 
@@ -63,14 +63,12 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
             print(f"[Transfer] Layer {layer_id} for {req_id} copy: slice={k_tensor.flatten()[:10]}")
 
         past_key_values.update(k_tensor,v_tensor,layer_id,cache_kwargs=None)
-
-    # logits
-    logits = None
-    if end_layers == 32:
-        shape_logits = (batch_size,32000)
-        logits = page_table.get_logits_kv_gpu(req_id=req_id, device=decode_device , shape=shape_logits , cpu_kv_manager=cpu_kv_manager)
-        overlap_time = max(0,(page_table[req_id]["prefill_end_time"] - start_t1) * 1000 )
-        overlap_percentage = (overlap_time / (time.time() - start_t1) ) * 100
-        print(f'''[Transfer] stage for req {req_id} has been completed with an overlap time of {overlap_time:2f} ms and overlap percentage {overlap_percentage:2f} % and prefill_end_time=  {page_table[req_id]["prefill_end_time"]} and transfer start {start_t1}''') 
     
+    # logits
+    shape_logits = (batch_size,32000)
+    logits = page_table.get_logits_kv_gpu(req_id=req_id, device=decode_device , shape=shape_logits , cpu_kv_manager=cpu_kv_manager)
+
+    if page_table[req_id]["GPU0_transfer_end_time"] == 0.0:
+        page_table[req_id]["GPU0_transfer_end_time"] = time.time()
+
     return past_key_values , logits

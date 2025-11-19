@@ -40,7 +40,7 @@ def _load_model_once():
     
     return _model, _tokenizer
 
-def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_write_to_cpu_queue , start_time):
+def prefill_stage(req_id,prompt,page_table,cpu_kv_manager, kv_write_to_cpu_queue):
 
     torch.cuda.set_device(1)
     print(f"[Prefill] for req {req_id} has been started ")
@@ -65,16 +65,15 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
     page_table.init_request(req_id = req_id, num_layers=model.config.num_hidden_layers, seq_len=seq_len, shape = kv_shape, dtype=torch.float16)
     print(f"[Prefill] for req {req_id} has complete the Page_table_intialization  ") if DEBUG_PREFILL else None
 
-
-    prefill_start = datetime.now()
-    prefill_start1 = time.time()
-    print(f"[{prefill_start.strftime('%H:%M:%S.%f')[:-3]}] Prefill START {req_id}") if DEBUG_PREFILL else None
+    page_table[req_id]["req_id_start_time"] = time.time()
+    page_table[req_id]["prefill_start_time"] = time.time()
+    print(f"Prefill START {req_id}") if DEBUG_PREFILL else None
 
 
     class CPUStreamingCache(DynamicCache):
         def update(self, key_states, value_states, layer_idx, cache_kwargs=None):
 
-            t1 = datetime.now()
+            # t1 = datetime.now()
             
             # if "hf_kv" not in page_table[req_id]:
             #     page_table[req_id]["hf_kv"] = {}
@@ -89,19 +88,16 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
             # }
 
             
-            print(f"[Prefill] for req {req_id} shape {key_states.shape}") if DEBUG_PREFILL and layer_idx == 0 else None 
-
-            print(f"[Prefill] for req {req_id} has started for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
+            # print(f"[Prefill] for req {req_id} shape {key_states.shape}") if DEBUG_PREFILL and layer_idx == 0 else None 
+            # print(f"[Prefill] for req {req_id} has started for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
             # page_table.set_kv_cpu(req_id = req_id , layer = layer_idx, k_tensor = k_clone , v_tensor = v_clone, cpu_kv_manager = cpu_kv_manager)
-            # event = torch.cuda.Event()
-            # copy_stream.record_event(event)
-            kv_write_to_cpu_queue.put((req_id,layer_idx,k_clone,
-                v_clone , start_time))
             
-
-            print(f"[Prefill] for req {req_id} has complete for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
+            kv_write_to_cpu_queue.put((req_id,layer_idx,k_clone,v_clone))
+        
+            # print(f"[Prefill] for req {req_id} has complete for Set_KV_CPU for {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None 
 
             # page_table.update_layers_at_cpu(req_id)
+            
             print(f"[Prefill] for req {req_id} has sucessfully incremented the layer {page_table.get_layer_at_cpu(req_id)}") if DEBUG_PREFILL and layer_idx == 0 else None 
             
             # if not page_table[req_id]["warmup_done"] and page_table.get_layer_at_cpu(req_id) < 5 and not page_table[req_id]["warmup_scheduled"]:
@@ -111,52 +107,47 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
             # if layer_idx == 0:
             # print(f"[Prefill] Layer {layer_idx} for {req_id} is CPU KV written. slice={k_clone.flatten()[:10]}") if DEBUG_PREFILL else None
             
-            print(f"[Prefill] for req {req_id} has streamed layer: {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None
-            end = datetime.now()
-            elapsed_ms1 = (end - t1).total_seconds() * 1000
-            print(f"{elapsed_ms1:.2f} ms is the time for time layer")
+            # print(f"[Prefill] for req {req_id} has streamed layer: {layer_idx}") if DEBUG_PREFILL and layer_idx == 0 else None
+            # end = datetime.now()
+            # elapsed_ms1 = (end - t1).total_seconds() * 1000
+            # print(f"{elapsed_ms1:.2f} ms is the  for time layer")
             return super().update(key_states, value_states, layer_idx, cache_kwargs)
 
     
     cache = CPUStreamingCache()
 
     print(f"[Prefill] for req {req_id} has started forward pass") if DEBUG_PREFILL else None
-
+    
     # Forward pass
     with torch.no_grad():
         outputs = model(**inputs_gpu, past_key_values=cache, use_cache=True)
 
-    
     print(f"[Prefill] for req {req_id} has completed forward pass") if DEBUG_PREFILL else None
 
-    # copy_stream.synchronize()
-    print(f"[Prefill] All async copies completed for req {req_id}")
-
-
+    
     print(f"[Prefill] for req {req_id} has started for set_logits_kv_cpu") if DEBUG_PREFILL else None 
-    logits_cpu = outputs.logits[:, -1, :].clone().detach().contiguous()
+    logits_cpu = outputs.logits[:, -1, :].detach().contiguous()
+    
     print(f"Shape of the logits {logits_cpu.shape}") if DEBUG_PREFILL else None 
+    
     page_table.set_logits_kv_cpu(req_id,logits_cpu,cpu_kv_manager)
     
     print(f"[Prefill] for req {req_id} has started for set_logits_kv_cpu") if DEBUG_PREFILL else None 
     
-    # page_table.table[req_id]["decode_can_start"] = True
-
     torch.cuda.synchronize(prefill_device)
 
-    prefill_end = datetime.now()
     page_table[req_id]["prefill_end_time"] = time.time()
     
-    elapsed_ms = (prefill_end - prefill_start).total_seconds() * 1000
+    # elapsed_ms = (page_table[req_id]["prefill_end_time"] - page_table[req_id]["prefill_start_time"]) * 1000
 
-    print(
-        f"[{prefill_end.strftime('%H:%M:%S.%f')[:-3]}] Prefill END {req_id} "
-        f"(took {elapsed_ms:.2f} ms)"
-    )
+    # print(
+    #     f"[{prefill_end.strftime('%H:%M:%S.%f')[:-3]}] Prefill END {req_id} "
+    #     f"(took {elapsed_ms:.2f} ms)"
+    # )
 
-    overlap_time = max(0,(time.time() - page_table[req_id]["CPU_transfer"]) * 1000 )
-    overlap_percentage = (overlap_time / (elapsed_ms) ) * 100
-    print(f'''[Transfer] stage for req {req_id} has been completed with an overlap time of {overlap_time:2f} ms and overlap percentage {overlap_percentage:2f} %''') 
+    # overlap_time = max(0,(time.time() - page_table[req_id]["CPU_transfer"]) * 1000 )
+    # overlap_percentage = (overlap_time / (elapsed_ms) ) * 100
+    # print(f'''[Transfer] stage for req {req_id} has been completed with an overlap time of {overlap_time:2f} ms and overlap percentage {overlap_percentage:2f} %''') 
 
     
 

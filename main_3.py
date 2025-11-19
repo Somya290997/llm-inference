@@ -7,40 +7,38 @@ req_id1 = 1
 prompt1 = '''Tell me something facts about India?'''
 
 req_id2 = 2
-prompt2 = '''Summarise it in few sentences: In modern AI systems, especially those using transformer-based architectures, the size of the input prompt plays an important role in determining latency, memory usage, and the quality of generated responses. When engineers talk about a prompt being around one thousand tokens, they are usually referring to a block of text that is several paragraphs long—roughly four to five thousand characters in length. This amount of text may include system instructions, user queries, constraints, or even examples used in few-shot prompting. Understanding what this looks like in practice helps when designing systems, such as translation pipelines, retrieval-augmented generation frameworks, or multi-process inference architectures, where prompt size directly affects throughput and GPU utilization.
+prompt2 = ''' Can you Summarise the give paragraphs in a in few sentences ? Mahendra Singh Dhoni (born 7 July 1981) is an Indian professional cricketer who plays as a right-handed batter and a wicket-keeper. Widely regarded as one of the most prolific wicket-keeper batsmen and captains, he represented the Indian cricket team and was the captain of the side in limited overs formats from 2007 to 2017 and in test cricket from 2008 to 2014. Dhoni has captained the most international matches and is the most successful Indian captain. He has led India to victory in the 2007 ICC World Twenty20, the 2011 Cricket World Cup, and the 2013 ICC Champions Trophy, being the only captain to win three different limited overs ICC tournaments. He also led the teams that won the Asia Cup in 2010 and 2016, and he was a member of the title winning squad in 2018.
 
-When a transformer model receives a large prompt, it must process all tokens through every layer during the prefill stage. This is expensive, especially for decoder-only models used in LLMs. The prefill phase computes attention across all input tokens, meaning that the computational complexity increases quadratically with the prompt length. For example, a 1024-token prompt requires roughly four times the compute of a 512-token prompt for the same model. Because of this, engineers working on real-time applications, such as speech-to-text translation or conversational agents, must optimize prompt size carefully to balance context and latency.
+Born in Ranchi, Dhoni made his first class debut for Bihar in 1999. He made his debut for the Indian cricket team on 23 December 2004 in an ODI against Bangladesh and played his first test a year later against Sri Lanka. In 2007, he became the captain of the ODI side before taking over in all formats by 2008. Dhoni retired from test cricket in 2014 but continued playing in limited overs cricket till 2019. He has scored 17,266 runs in international cricket including 10,000 plus runs at an average of more than 50 in ODIs.
 
-Another aspect of managing a 1024-token prompt is memory. Each token generates key and value tensors for each attention head in every layer, which are stored in the KV cache. If a model has, for example, 32 layers and 32 attention heads per layer, the KV cache for 1024 tokens can easily exceed several hundred megabytes, depending on the hidden dimension. This is why many high-performance inference frameworks, such as vLLM, FlashAttention-based servers, or custom systems using CUDA streams, focus heavily on KV cache compression, sharing, or streaming. Smaller prompt sizes significantly reduce memory footprint and allow serving more simultaneous requests on a single GPU.
-
-Another important point is prompt engineering. Even when models support long context windows, such as 32k or 128k, not all content contributes equally to the final generation quality. Effective prompting often involves rewriting or summarizing information so that the most relevant parts appear earlier in the sequence. For example, in a retrieval-augmented generation system, retrieved passages may be chunked into smaller segments so that the LLM can focus on the highest-ranking ones rather than blindly receiving large blocks of text.
-
-Finally, understanding prompt length matters when fine-tuning as well. During training, especially when using QLoRA or LoRA adapters, batching large prompt sequences increases GPU memory consumption. Many engineers limit training sequence length to 512 or 1024 tokens for efficiency, unless training a model explicitly meant for long-form reasoning. The trade-offs between sequence length, batch size, and memory often define the maximum throughput of the training loop.
-
-Overall, a 1024-token prompt is long enough to include multiple instructions, several examples, and extensive user context, but short enough to be processed efficiently by most mid-sized LLMs. Understanding its structure and impact is an essential part of building scalable, low-latency AI systems.'''
+In the Indian Premier League (IPL), Dhoni plays for Chennai Super Kings (CSK), leading them to the final on ten occasions and winning it five times (2010, 2011, 2018, 2021 and 2023) jointly sharing this title with Rohit Sharma . He has also led CSK to two Champions League T20 titles in 2010 and 2014. Dhoni is among the few batsmen to have scored more than five thousand runs in the IPL, as well as being the first wicket-keeper to do so.'''
 
 req_id3 = 3
 prompt3 = ''' Can you summarise this paragrapgh, Modern large-scale AI systems have rapidly evolved into complex, distributed computational pipelines that require careful engineering to achieve both speed and accuracy. Over the past decade, the field has shifted from single-machine training to massively parallelized training strategies that involve sophisticated orchestration across GPUs, TPUs, and heterogeneous accelerators. These systems not only need to support multi-billion-parameter models, but must also optimize communication overhead between devices, manage sharded tensors efficiently, and continuously track memory fragmentation, IO bottlenecks, and latency spikes. As models have grown larger, inference itself has become a significant engineering challenge.'''
 
 
 # runtime.submit_request(req_id=req_id1,prompt=prompt1)
-runtime.submit_request(req_id=req_id2,prompt=prompt2)
+runtime.submit_request(req_id=req_id2,prompt=prompt1)
 
 time.sleep(30)
 
 runtime.submit_request(req_id=210,prompt=prompt2)
+runtime.submit_request(req_id=211,prompt="Can you tell something about Norway ?")
 
-time.sleep(10)
+runtime.submit_request(req_id=212,prompt=prompt3)
+runtime.submit_request(req_id=213,prompt="Can you tell something about Sweden ?")
 
-runtime.submit_request(req_id=212,prompt=prompt2)
+# time.sleep(10)
 
-time.sleep(10)
+# runtime.submit_request(req_id=212,prompt=prompt2)
 
-runtime.submit_request(req_id=213,prompt=prompt2)
+# time.sleep(10)
 
-time.sleep(10)
+# runtime.submit_request(req_id=213,prompt=prompt2)
 
-runtime.submit_request(req_id=214,prompt=prompt2)
+# time.sleep(10)
+
+# runtime.submit_request(req_id=214,prompt=prompt2)
 
 # runtime.submit_request(req_id=req_id3,prompt=prompt3)
 
