@@ -142,11 +142,15 @@ def prefill_stage(req_id,prompt,page_table,cpu_kv_manager,schedular_queue , kv_w
     torch.cuda.synchronize(prefill_device)
 
     prefill_end = datetime.now()
+    page_table[req_id]["prefill_end_time"] = prefill_end
+    
     elapsed_ms = (prefill_end - prefill_start).total_seconds() * 1000
 
     print(
         f"[{prefill_end.strftime('%H:%M:%S.%f')[:-3]}] Prefill END {req_id} "
         f"(took {elapsed_ms:.2f} ms)"
     )
+
+    
 
     

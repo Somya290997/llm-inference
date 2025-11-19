@@ -26,12 +26,18 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
     shape = (batch_size, n_heads, seq_len, hidden_dim) 
 
     past_key_values = DynamicCache()
+    start_t = 0
+
+    if end_layers == 32 and page_table[req_id]["prefill_end_time"] is not 0:
+        start_t = datetime.now()
 
     for layer_id in range(start_layers,end_layers):
 
         start_t = time.time()
 
         k_tensor , v_tensor = page_table.get_kv_gpu(req_id=req_id, layer=layer_id , shape=shape , device=decode_device ,cpu_kv_manager=cpu_kv_manager) 
+
+        # Used to KV metrics values are equal or not
 
         # k_hf = page_table[req_id]["hf_kv"][layer_id]["k"].to(k_tensor.device).clone()
         # v_hf = page_table[req_id]["hf_kv"][layer_id]["v"].to(v_tensor.device).clone()
@@ -63,6 +69,8 @@ def transfer_stage(req_id, start_layers , end_layers, page_table , cpu_kv_manage
     if end_layers == 32:
         shape_logits = (batch_size,32000)
         logits = page_table.get_logits_kv_gpu(req_id=req_id, device=decode_device , shape=shape_logits , cpu_kv_manager=cpu_kv_manager)
-        print(f"[Transfer] stage for req {req_id} has been completed") 
+        overlap_time = max(0,(page_table[req_id]["prefill_end_time"] - start_t))
+        overlap_percentage = (overlap_time / (datetime.now()-start_t) ) * 100
+        print(f"[Transfer] stage for req {req_id} has been completed with an overlap time of {overlap_time:2f} ms and overlap percentage {overlap_percentage:2f} %") 
     
     return past_key_values , logits

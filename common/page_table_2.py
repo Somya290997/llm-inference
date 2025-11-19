@@ -39,7 +39,8 @@ class PageTable:
             "transfer_in_progress": False,    # avoid double scheduling
             "layers_transfered" : 0,
             "ready_for_decode": False,        # decode can begin
-            "kv_gpu_bytes": 0           # estimated KV memory size for scheduling
+            "kv_gpu_bytes": 0,
+            "prefill_end_time": 0           # estimated KV memory size for scheduling
         }
 
 
