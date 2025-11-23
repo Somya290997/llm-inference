@@ -27,6 +27,7 @@ class PageTable:
             "last_layer_logits" : None,
             "num_layers": num_layers,
             "seq_len" : seq_len,
+            "seq_lens": None,
             "shape": shape,
             "dtype": dtype,
             "full_transfer_scheduled": False,
@@ -55,7 +56,8 @@ class PageTable:
             "GPU0_transfer_start_time": 0.0,
             "GPU0_transfer_end_time": 0.0,
             "Decode_start_time" : 0.0,
-            "Decode_end_time": 0.0
+            "Decode_end_time": 0.0,
+            "generated_tokens": 0
         }
 
 

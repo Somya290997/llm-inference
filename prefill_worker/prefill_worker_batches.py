@@ -5,7 +5,7 @@ from datetime import datetime
 import time
 import yaml
 
-DEBUG_PREFILL = False
+DEBUG_PREFILL = True
 
 # Loading the Yaml files
 with open("config/model_config.yaml", "r") as f:
@@ -65,7 +65,7 @@ def prefill_stage(req_id, input_ids , request_prompt,page_table,cpu_kv_manager, 
 
             k_clone = key_states.detach().contiguous()
             v_clone = value_states.detach().contiguous()
-    
+
             kv_write_to_cpu_queue.put((req_id,layer_idx,k_clone,v_clone))
     
             # print(f"[Prefill] for req {req_id} has sucessfully incremented the layer {page_table.get_layer_at_cpu(req_id)}") if DEBUG_PREFILL and layer_idx == 0 else None 
@@ -78,11 +78,44 @@ def prefill_stage(req_id, input_ids , request_prompt,page_table,cpu_kv_manager, 
     
     # Forward pass
     with torch.no_grad():
-        outputs = model(**input_ids, past_key_values=cache, use_cache=True)
+        outputs = model(input_ids, past_key_values=cache, use_cache=True)
+
+        
+
+    # -------- LOGITS EXTRACTION (SAFEST VERSION) --------
+    logits = outputs.logits  # [B, T, vocab]
+    
+    # Retrieve real sequence lengths
+    seq_lens_per_prompt = page_table[req_id]["seq_lens"]  # example: [8, 15, 13, 14, 8]
+    
+    # Convert to torch tensor on correct device
+    seq_lens_tensor = torch.tensor(seq_lens_per_prompt, device=logits.device)
+    
+    # --- CRITICAL: FIXING 0-D TENSOR (batch_size = 1 case) ---
+    if seq_lens_tensor.ndim == 0:      # e.g., tensor(15)
+        seq_lens_tensor = seq_lens_tensor.unsqueeze(0)
+    
+    batch_size = seq_lens_tensor.shape[0]
+    print(f"[Prefill] batch_size = {batch_size}, seq_lens_tensor = {seq_lens_tensor}")
+    
+    # SAFE extraction of last token logits per request
+    real_last_logits = logits[
+        torch.arange(batch_size, device=logits.device),
+        seq_lens_tensor - 1,
+        :
+    ]
+
+    real_last_logits_cpu = real_last_logits.detach().contiguous()
+    page_table.set_logits_kv_cpu(req_id,real_last_logits_cpu,cpu_kv_manager)
+    
+    print(f"[Prefill] real_last_logits shape = {real_last_logits.shape}")
+
+    torch.cuda.synchronize(prefill_device)
+
+    
 
     print(f"[Prefill] for req {req_id} has completed forward pass") if DEBUG_PREFILL else None
 
-    torch.cuda.synchronize(prefill_device)
 
     page_table[req_id]["prefill_end_time"] = time.time()
 
