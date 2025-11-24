@@ -1,0 +1,217 @@
+import queue
+import threading
+import heapq
+
+from datetime import datetime
+import time
+
+from page_table.page_table_batches_2 import PageTable
+from cpu_kv_manager.cpu_kv_blockmanger_batches import CPUKVBlockManager
+from batcher.prefill_batcher_2 import prefill_batches_stage
+from prefill_worker.prefill_worker_batches import prefill_stage
+
+from scheduler.scheduler_batches import scheduler_stage
+from transfer_kv.transfer_kv_worker_batches import transfer_stage
+from decode_worker.ActiveRequest import ActiveRequest
+
+from decode_worker.decode_worker_batches_2 import decode_one_token_step
+from transfer_kv.transfer_kv_cpu_worker_batches import transfer_kv_cpu_worker
+
+class Runtime:
+
+    def __init__(self):
+
+        print("Initializing runtime...")
+
+        # 1) PRELOAD MODELS BEFORE STARTING THREADS
+        from models import model_loader
+        self.prefill_model = model_loader.get_model("cuda:1")
+        self.tokenizer = model_loader.get_tokenizer()
+        self.decode_model = model_loader.get_model("cuda:0")
+
+        print("Models PRELOADED on GPUs (no cold start!) \n")
+
+        # Queue
+        self.user_input_queue = queue.Queue()
+        self.prefill_queue = queue.Queue()
+        
+        self.scheduler_queue = queue.Queue()
+        self.max_req_id = 0
+        
+        self.transfer_queue = queue.Queue()
+        self.decode_queue = queue.Queue()
+        self.kv_write_to_cpu_queue = queue.Queue()
+
+        self.cache = None
+
+        # Class to manage
+        self.cpu_kv_manager = CPUKVBlockManager()
+        self.page_table = PageTable()
+
+        # bin batches
+        self.active_decode_pools = {}
+
+
+        # Threads
+        threading.Thread(target=self.user_input_worker, args=() , daemon=True).start()
+        threading.Thread(target=self.prefill_worker, args=() , daemon=True).start()
+        threading.Thread(target=self.KV_write_CPU_worker, args=() , daemon=True).start()
+        threading.Thread(target=self.scheduler_worker, args=() , daemon=True).start()
+        threading.Thread(target=self.transfer_worker, args=() , daemon=True).start()
+        threading.Thread(target=self.decode_worker, args=() , daemon=True).start()
+
+    # To submit the request
+    def submit_request(self, prompt):
+        print(f"Inside the submit_request")
+        self.user_input_queue.put(prompt)
+
+    # Workers
+        
+    # user_input_worker
+    def user_input_worker(self):
+        while True:
+            req_id , input_ids , request_prompt = prefill_batches_stage(self.user_input_queue,self.page_table,batch_size=16,runtime=self)
+            self.max_req_id = max(self.max_req_id,req_id)
+            # print(f"About to put inside the prefill queue")
+            self.prefill_queue.put((req_id , input_ids , request_prompt))
+
+            
+    # prefill_worker
+    def prefill_worker(self):
+        while True:
+            req_id , input_ids , request_prompt = self.prefill_queue.get()
+            prefill_stage(req_id=req_id, input_ids=input_ids, request_prompt=request_prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager, kv_write_to_cpu_queue=self.kv_write_to_cpu_queue,runtime=self)
+            
+
+    def KV_write_CPU_worker(self):
+        while True:
+            request_for_transfer = self.kv_write_to_cpu_queue.get()
+            transfer_kv_cpu_worker(request_for_transfer,self.page_table,self.cpu_kv_manager,self.scheduler_queue)
+
+
+    # scheduler_worker
+    def scheduler_worker(self):
+        while True:
+
+            if self.scheduler_queue.empty():     
+                time.sleep(0.001)           
+                continue
+                
+            req_id = self.scheduler_queue.get()
+    
+            action = scheduler_stage(req_id, self.page_table, self.cpu_kv_manager)
+    
+            if action == "START_TRANSFER":
+                self.transfer_queue.put(req_id)
+    
+            elif action == "WAIT":
+                time.sleep(0.002)
+                self.scheduler_queue.put(req_id)
+    
+            elif action == "RETRY":
+                time.sleep(0.005)
+                self.scheduler_queue.put(req_id)
+
+    # transfer_worker
+    def transfer_worker(self):
+        while True:
+            req_id  = self.transfer_queue.get()
+            # print(f"[Transfer] Dynamic full transfer for req {req_id}")
+            KV_cache , logits = transfer_stage(req_id, self.page_table, self.cpu_kv_manager)
+            # print(f"[Transfer] Dynamic full transfer for req {req_id} has been completed")
+
+            # Check the bin size
+            bin_size = self.page_table[req_id]["bin"]
+            if bin_size not in self.active_decode_pools:
+                self.active_decode_pools[bin_size] = {}
+
+            batch_size = logits.shape[0]
+
+            for i in range(batch_size):
+                single_kv = [
+                    (k[i:i+1], v[i:i+1])    # (1, heads, seq, dim)
+                    for k, v in KV_cache
+                ]
+    
+                single_logits = logits[i:i+1]    # shape (1, vocab)
+    
+                unique_id = (req_id, i)          # make it unique
+                active_request = ActiveRequest(unique_id, single_kv)
+                active_request.init_generated(self.page_table , single_logits)
+                self.active_decode_pools[bin_size][unique_id] = active_request
+
+                print(f"[Decode-Ready] req {req_id} for {i} added to bin {bin_size} for decode")
+
+    
+    # decode worker
+    def decode_worker(self):
+        while True:
+            for bin_size , pool in list(self.active_decode_pools.items()):
+                
+                decode_batch = list(pool.values())
+                if not decode_batch:
+                    continue
+
+                decode_one_token_step(decode_batch,self.page_table,self)
+                new_pool = {
+                    req_id: req for req_id, req in pool.items() if not req.finished
+                }
+                if new_pool:
+                    self.active_decode_pools[bin_size] = new_pool
+                else:
+                    del self.active_decode_pools[bin_size]
+                
+            time.sleep(0.001)
+
+    def compute_global_metrics(self,total_req_count):
+        gm = self.page_table.global_metrics
+        if gm["request_count"] == total_req_count:
+            def avg(x): return sum(x)/len(x) if x else 0.0
+        
+            print("\n===== SYSTEM-WIDE METRICS =====")
+            print(f"Avg TTFT                  : {avg(gm['ttft_list']):.2f} ms")
+            print(f"Avg TBT                   : {avg(gm['tbt_list']):.2f} ms")
+            print(f"Avg Prefill Time          : {avg(gm['prefill_ms']):.2f} ms")
+            print(f"Avg Decode Time           : {avg(gm['decode_ms']):.2f} ms")
+            print(f"Avg Total Latency         : {avg(gm['total_latency_ms']):.2f} ms")
+            print(f"Total Tokens Generated    : {gm['generated_tokens_total']}")
+
+            # ---- per request decode time (already computed) ----
+            avg_decode_request = avg(gm['decode_ms'])          # e.g., 27,961 ms
+            
+            # ---- tokens per request (200 in your case) ----
+            tokens_per_request = gm["generated_tokens_total"] / gm["request_count"]
+            
+            # ---- Decode time PER TOKEN ----
+            avg_decode_per_token = avg_decode_request / tokens_per_request
+            
+            print(f"Avg Decode Time (per token) : {avg_decode_per_token:.2f} ms")
+        
+            # ------ Tokens Per Second (TPS) ------
+            if gm["decode_times_total"] > 0:
+                tps = gm['generated_tokens_total'] / gm['decode_times_total']
+                print(f"Tokens per Second (TPS)   : {tps:.2f}")
+            else:
+                print("Tokens per Second (TPS)   : N/A")
+        
+            # ------ Throughput (Req/sec) ------
+            total_runtime = time.time() - gm["runtime_start"]
+            if total_runtime > 0 and gm["request_count"] > 0:
+                req_per_sec = gm["request_count"] / total_runtime
+                print(f"Requests per Second       : {req_per_sec:.2f}")
+            else:
+                print("Requests per Second       : N/A")
+        
+            # ------ Tokens per Request ------
+            if gm["request_count"] > 0:
+                tokens_per_req = gm["generated_tokens_total"] / gm["request_count"]
+                print(f"Tokens per Request        : {tokens_per_req:.2f}")
+            else:
+                print("Tokens per Request        : N/A")
+        
+            print("=====================================\n")
+                
+                
+
+            
+        

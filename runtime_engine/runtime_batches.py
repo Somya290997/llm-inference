@@ -66,7 +66,7 @@ class Runtime:
     # user_input_worker
     def user_input_worker(self):
         while True:
-            req_id , input_ids , request_prompt = prefill_batches_stage(self.user_input_queue,self.page_table,runtime=self)
+            req_id , input_ids , request_prompt = prefill_batches_stage(self.user_input_queue,self.page_table,batch_size=16,runtime=self)
             self.max_req_id = max(self.max_req_id,req_id)
             print(f"About to put inside the prefill queue")
             self.prefill_queue.put((req_id , input_ids , request_prompt))

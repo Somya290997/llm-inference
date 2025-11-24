@@ -10,7 +10,7 @@ def calculate_throughput(page_table):
             start = entry["req_id_start_time"]
             end = entry["Decode_start_time"]
             total_time += (end - start)
-            completed += 1
+            completed += entry["batch_size"]
 
     if completed == 0:
         return print("No completed requests yet")
@@ -23,9 +23,6 @@ def calculate_throughput(page_table):
     print(f"Avg request time: {avg_time*1000:.2f} ms")
     print(f"🔥 Throughput = {qps:.3f} requests/sec")
 
-def final_performance_report(page_table):
-    calculate_throughput(page_table)       # QPS
-    calculate_token_throughput(page_table) # tokens/sec
 
 def calculate_token_throughput(page_table):
     total_tokens = 0
@@ -42,6 +39,9 @@ def calculate_token_throughput(page_table):
     tps = total_tokens / total_decode_time
     print(f"🔥 Token Throughput = {tps:.2f} tokens/sec")
     
+def final_performance_report(page_table):
+    calculate_throughput(page_table)       # QPS
+    calculate_token_throughput(page_table) # tokens/sec
 
 runtime = Runtime()
 
@@ -52,9 +52,6 @@ prompt4 = '''Tell me something facts about Asia and do people love living there?
 prompt5 = '''Tell me something facts about Africa?'''
 
 runtime.submit_request(prompt1)
-
-time.sleep(11)
-
 runtime.submit_request(prompt1)
 runtime.submit_request(prompt2)
 runtime.submit_request(prompt3)
@@ -106,7 +103,7 @@ while runtime.page_table[last_req]["req_id_end_time"] == 0.0:
     time.sleep(1)
     
 print("All requests finished!")
-calculate_throughput(page_table)
+final_performance_report(page_table)
 
 while True:
     time.sleep(10)

@@ -9,6 +9,19 @@ class PageTable:
     def __init__(self):
         self.table = {}
 
+        self.global_metrics = {
+            "ttft_list": [],       # ms for each request
+            "tbt_list": [],        # average TBT per request
+            "prefill_ms": [],      # per request
+            "decode_ms": [],       # per request
+            "total_latency_ms": [],# end - start
+            
+            "generated_tokens_total": 0,   # sum across all requests
+            "decode_times_total": 0.0,
+            "request_count": 0,            # total completed requests
+            "runtime_start": time.time(),
+        }
+
     def __getitem__(self, req_id):
         return self.table[req_id]
 
@@ -25,6 +38,7 @@ class PageTable:
             "layers" : {},
             "input_ids" : None,
             "last_layer_logits" : None,
+            "generated_text": [],
             "num_layers": num_layers,
             "seq_len" : seq_len,
             "seq_lens": None,
