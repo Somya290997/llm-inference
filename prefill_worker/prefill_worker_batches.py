@@ -40,7 +40,7 @@ def _load_model_once():
     
     return _model, _tokenizer
 
-def prefill_stage(req_id, input_ids , request_prompt,page_table,cpu_kv_manager, kv_write_to_cpu_queue):
+def prefill_stage(req_id, input_ids , request_prompt ,page_table,cpu_kv_manager, kv_write_to_cpu_queue , runtime):
 
     torch.cuda.set_device(1)
 
@@ -48,7 +48,8 @@ def prefill_stage(req_id, input_ids , request_prompt,page_table,cpu_kv_manager, 
     enable_p2p()
     print(f"[Prefill] for req {req_id} has Enable P2P ") if DEBUG_PREFILL else None
 
-    model , tokenizer = _load_model_once()
+    model = runtime.prefill_model
+    tokenizer =  runtime.tokenizer
 
     seq_len = input_ids.shape[1]
     print(f"Number of tokens in {req_id} is {seq_len} ")

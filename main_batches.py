@@ -6,9 +6,9 @@ def calculate_throughput(page_table):
     total_time = 0.0
 
     for req_id, entry in page_table.table.items():
-        if entry["req_id_end_time"] != 0.0:  # request finished
+        if entry["Decode_start_time"] != 0.0:  # request finished
             start = entry["req_id_start_time"]
-            end = entry["req_id_end_time"]
+            end = entry["Decode_start_time"]
             total_time += (end - start)
             completed += 1
 

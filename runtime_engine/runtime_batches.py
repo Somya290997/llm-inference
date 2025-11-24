@@ -20,6 +20,17 @@ class Runtime:
 
     def __init__(self):
 
+
+        print("Initializing runtime...")
+
+        # 1) PRELOAD MODELS BEFORE STARTING THREADS
+        from models import model_loader
+        self.prefill_model      = model_loader.get_model("cuda:1")
+        self.tokenizer  = model_loader.get_tokenizer()
+        self.decode_model       = model_loader.get_model("cuda:0")
+
+        print("Models PRELOADED on GPUs (no cold start!) \n")
+
         # Queue
         self.user_input_queue = queue.Queue()
         self.prefill_queue = queue.Queue()
@@ -55,7 +66,7 @@ class Runtime:
     # user_input_worker
     def user_input_worker(self):
         while True:
-            req_id , input_ids , request_prompt = prefill_batches_stage(self.user_input_queue,self.page_table)
+            req_id , input_ids , request_prompt = prefill_batches_stage(self.user_input_queue,self.page_table,runtime=self)
             self.max_req_id = max(self.max_req_id,req_id)
             print(f"About to put inside the prefill queue")
             self.prefill_queue.put((req_id , input_ids , request_prompt))
@@ -66,7 +77,7 @@ class Runtime:
     def prefill_worker(self):
         while True:
             req_id , input_ids , request_prompt = self.prefill_queue.get()
-            prefill_stage(req_id=req_id, input_ids=input_ids, request_prompt=request_prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager, kv_write_to_cpu_queue=self.kv_write_to_cpu_queue)
+            prefill_stage(req_id=req_id, input_ids=input_ids, request_prompt=request_prompt,page_table=self.page_table,cpu_kv_manager=self.cpu_kv_manager, kv_write_to_cpu_queue=self.kv_write_to_cpu_queue,runtime=self)
             
 
     def KV_write_CPU_worker(self):
@@ -112,7 +123,7 @@ class Runtime:
     def decode_worker(self):
         while True:
             req_id  , KV_cache , logits = self.decode_queue.get()
-            decode_stage(req_id,KV_cache,logits,self.page_table,self.cpu_kv_manager)
+            decode_stage(req_id,KV_cache,logits,self.page_table,self.cpu_kv_manager,self)
 
 
 

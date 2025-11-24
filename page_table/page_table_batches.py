@@ -40,7 +40,6 @@ class PageTable:
             "transfer_rate_ms": None,         # avg ms per layer
             
             "transfer_in_progress": False,    # avoid double scheduling
-            
             "layers_transfered" : 0,
             
             "ready_for_decode": False,        # decode can begin

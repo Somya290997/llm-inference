@@ -13,18 +13,6 @@
 \f0\fs36 \cf0 \
 # To set up things in RunPods.\
 \
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh\
-bash ~/miniconda.sh -b -p $HOME/miniconda\
-\
-$HOME/miniconda/bin/conda init bash\
-source ~/.bashrc\
-\
-export PATH="$HOME/miniconda/bin:$PATH"\
-\
-conda --version\
-\
-conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main\
-conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r\
 \
 \
 cd llm-inference\

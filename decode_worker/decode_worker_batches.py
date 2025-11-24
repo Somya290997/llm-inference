@@ -70,9 +70,10 @@ def sample_top_p(logits, temperature=0.8, top_p=0.9):
     return torch.multinomial(probs, num_samples=1)  # [B,1]
     
 
-def decode_stage(req_id, past_key_values, logits, page_table, cpu_kv_manager):
+def decode_stage(req_id, past_key_values, logits, page_table, cpu_kv_manager, runtime):
     torch.cuda.set_device(0)
-    model, tokenizer = _load_model_once()
+    model = runtime.decode_model
+    tokenizer = runtime.tokenizer
 
     eos = tokenizer.eos_token_id
     max_new_tokens = 128

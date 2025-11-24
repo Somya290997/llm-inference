@@ -40,15 +40,19 @@ def collect_batch(user_input_queue, max_batch=16, max_wait_ms=2000, timeout=2):
 
     return curr
 
-def prefill_batches_stage(user_input_queue, page_table ,batch_size = 16):
+def prefill_batches_stage(user_input_queue, page_table ,batch_size, runtime):
     global _tokenizer , _global_req_id
 
     print(f"[PREFILL_BATCHER] Inside it ") if PREFILL_BATCHER else None
 
-    if _tokenizer is None:
-        _tokenizer = model_loader.get_tokenizer()
-        if _tokenizer.pad_token is None:
-            _tokenizer.pad_token = _tokenizer.eos_token
+    # if _tokenizer is None:
+    #     _tokenizer = model_loader.get_tokenizer()
+    #     if _tokenizer.pad_token is None:
+    #         _tokenizer.pad_token = _tokenizer.eos_token
+
+    _tokenizer = runtime.tokenizer
+    if _tokenizer.pad_token is None:
+        _tokenizer.pad_token = _tokenizer.eos_token
     
     req_id = _global_req_id
     _global_req_id += 1
