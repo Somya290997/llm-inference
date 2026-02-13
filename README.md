@@ -114,16 +114,7 @@ Dual NVIDIA L4 GPUs
   Time To First Token        20× faster
   Throughput                 4× higher
 
-------------------------------------------------------------------------
 
-## Demo Placeholder
-
-Add GIF or screenshots here showing runtime execution or token streaming
-output.
-
-``` markdown
-![Demo](docs/demo.gif)
-```
 
 ------------------------------------------------------------------------
 
