@@ -1,4 +1,4 @@
-Disaggregated LLM Inference System
+##Disaggregated LLM Inference System
 
 Prefill Decode Separation | KV Streaming | CPU Paging | Dynamic Decode Scheduling
 
@@ -11,13 +11,13 @@ approaches.
 Built as part of Systems for Machine Learning coursework at the
 University of Colorado Boulder.
 
-Authors
+##Authors
 Likhit Sai Kothapalli
 Somya Pathak
 
 ------------------------------------------------------------------------
 
-Motivation
+##Motivation
 
 Most work around LLMs focuses on model training or fine tuning. In real
 production environments, inference performance is often constrained by:
@@ -38,7 +38,7 @@ than purely a modeling problem.
 
 ------------------------------------------------------------------------
 
-Key Ideas
+##Key Ideas
 
 Prefill Decode Disaggregation
 
